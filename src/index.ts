@@ -5,6 +5,7 @@ import {
 import { CONFIG } from './config.js';
 import { touchChannel } from './identity.js';
 import { registerCommands } from './register-commands.js';
+import { Notifier } from './notifier.js';
 import * as startCmd from './commands/start.js';
 
 /**
@@ -27,6 +28,7 @@ const client = new Client({
 
 client.once(Events.ClientReady, (c) => {
   console.log(`[discord] logged in as ${c.user.tag}`);
+  new Notifier(c).start();   // drains the shared outbox for platform='discord'
 });
 
 client.on(Events.InteractionCreate, async (i: Interaction) => {
