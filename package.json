@@ -1,0 +1,26 @@
+{
+  "name": "clubgg-union-discord",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord front-end for the ClubGG poker union settlement system — shares the same Neon database as the Telegram bot.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "register": "tsx src/register-commands.ts",
+    "migrate": "node scripts/migrate.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^13.0.1",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
