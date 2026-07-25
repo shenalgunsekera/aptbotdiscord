@@ -15,10 +15,10 @@ export const db = coreDb;
  * Use this for any `select some_function(...)` that moves money or notifies.
  * Plain reads can use db() directly.
  */
-export async function mutate<T>(fn: (sql: Sql) => Promise<T>): Promise<T> {
+export async function mutate<T>(fn: (sql: Sql) => PromiseLike<T>): Promise<T> {
   const result = await coreDb().begin(async (tx) => {
     await tx`select set_config('app.platform', 'discord', true)`;
-    return fn(tx as unknown as Sql);
+    return await fn(tx as unknown as Sql);
   });
   return result as unknown as T;
 }
