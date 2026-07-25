@@ -21,6 +21,11 @@ export interface Session {
   outPlatform?: string;
   outAmount?: number;
   outMethod?: string;
+  // edit flows
+  editAddPlatforms?: string[];   // platforms being added via /editplatform (awaiting account ids)
+  editBlocked?: string[];        // platforms that couldn't be removed (open activity)
+  // sportsbook create-account branch
+  sbUsername?: string;
 }
 
 const store = new Map<string, Session>();

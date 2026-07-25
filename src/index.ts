@@ -11,6 +11,7 @@ import * as start from './commands/start.js';
 import * as deposit from './commands/deposit.js';
 import * as withdraw from './commands/withdraw.js';
 import * as reads from './commands/reads.js';
+import * as edit from './commands/edit.js';
 import * as admin from './commands/admin.js';
 import { onReceiptMessage } from './commands/receipt.js';
 
@@ -50,8 +51,10 @@ async function onSlash(i: any): Promise<void> {
     case 'payments': return void (await reads.payments(i));
     case 'guide': return void (await reads.guide(i));
     case 'support': return void (await reads.support(i));
-    case 'editplatform': case 'editclubs': case 'editdeposit': case 'editwithdraw':
-      return void (await i.reply({ ephemeral: true, content: 'To change your setup for now, just tell our team here in your ticket — self-serve editing is coming soon.' }));
+    case 'editplatform': return void (await edit.editPlatform(i));
+    case 'editclubs': return void (await edit.editClubs(i));
+    case 'editdeposit': return void (await edit.editDeposit(i));
+    case 'editwithdraw': return void (await edit.editWithdraw(i));
     case 'ping': return void (await i.reply({ ephemeral: true, content: '🏓 pong' }));
     default: await i.reply({ ephemeral: true, content: 'Unknown command.' });
   }
@@ -67,11 +70,23 @@ async function onComponent(i: any): Promise<void> {
   // ── onboarding ──
   if (id === 'ob:name') return void (await start.onName(i));
   if (id === 'ob:platforms') return void (await start.onPlatforms(i));
+  if (id === 'ob:sbyes') return void (await start.onSbHas(i, true));
+  if (id === 'ob:sbno') return void (await start.onSbHas(i, false));
   if (id === 'ob:accounts') return void (await start.onAccounts(i));
+  if (id === 'ob:sbcreate') return void (await start.onSbCreate(i));
   if (id.startsWith('ob:clubs:')) return void (await start.onClubs(i, parts[2]!));
   if (id === 'ob:methods') return void (await start.onMethods(i));
   if (id === 'ob:payoutm') return void (await start.onPayoutMethod(i));
   if (id === 'ob:payouth') return void (await start.onPayoutHandle(i));
+
+  // ── edit ──
+  if (id === 'ed:methods') return void (await edit.onMethods(i));
+  if (id === 'ed:payoutm') return void (await edit.onPayoutMethod(i));
+  if (id === 'ed:payouth') return void (await edit.onPayoutHandle(i));
+  if (id === 'ed:clubpf') return void (await edit.onClubPlatform(i));
+  if (id.startsWith('ed:clubs:')) return void (await edit.onClubs(i, parts[2]!));
+  if (id === 'ed:platforms') return void (await edit.onPlatforms(i));
+  if (id === 'ed:pfaccounts') return void (await edit.onPfAccounts(i));
 
   // ── deposit ──
   if (id === 'add:pf') return void (await deposit.onPlatform(i));

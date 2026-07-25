@@ -1,11 +1,11 @@
 import {
-  ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder,
-  type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder,
+  type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction, type ButtonInteraction,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { registerPlayer, currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
-import { say, selectRow, depositMethods } from '../flows.js';
+import { say, selectRow } from '../flows.js';
 import type { Player, Platform } from '../core/index.js';
 
 /** /start — begin or resume setup. Chain: name → platforms → accounts → clubs →
@@ -40,17 +40,36 @@ async function askPlatforms(i: ChatInputCommandInteraction | ModalSubmitInteract
     components: [selectRow('ob:platforms', 'Choose platform(s)', platforms.map((pf) => ({ label: pf.name, value: pf.id })), { min: 1, max: platforms.length })] });
 }
 
-/** Platforms chosen → collect the account id(s) in one modal. */
+/** Platforms chosen → collect account id(s). If Sportsbook is one of them, first
+ *  ask whether they already have an APT Sports account (create-for-me branch). */
 export async function onPlatforms(i: StringSelectMenuInteraction): Promise<void> {
   ses(i.user.id).platforms = i.values;
   const chosen = await db()<Platform[]>`select * from platforms where id = any(${db().array(i.values)}::uuid[]) order by sort_order`;
-  const modal = new ModalBuilder().setCustomId('ob:accounts').setTitle('Your account details');
-  for (const pf of chosen.slice(0, 5)) {
-    const label = pf.code === 'clubgg' ? 'ClubGG ID' : pf.code === 'sportsbook' ? 'Sportsbook username' : `${pf.name} account ID`;
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId(pf.id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(true)));
+  if (chosen.some((pf) => pf.code === 'sportsbook')) {
+    return void (await i.update({ content: 'Do you already have an **APT Sports** account?',
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId('ob:sbyes').setLabel('✅ Yes, I have one').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('ob:sbno').setLabel('🆕 No, make me one').setStyle(ButtonStyle.Primary))] }));
   }
-  await i.showModal(modal);
+  await i.showModal(await accountsModal(i.values, false));
+}
+
+/** Build the account-details modal for the chosen platforms. When `create`, the
+ *  Sportsbook fields collect a DESIRED username + password (we make the account). */
+async function accountsModal(platformIds: string[], create: boolean): Promise<ModalBuilder> {
+  const chosen = await db()<Platform[]>`select * from platforms where id = any(${db().array(platformIds)}::uuid[]) order by sort_order`;
+  const modal = new ModalBuilder().setCustomId(create ? 'ob:sbcreate' : 'ob:accounts').setTitle('Your account details');
+  const add = (cid: string, label: string) => modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+    new TextInputBuilder().setCustomId(cid).setLabel(label.slice(0, 45)).setStyle(TextInputStyle.Short).setRequired(true)));
+  for (const pf of chosen.slice(0, 5)) {
+    if (pf.code === 'sportsbook' && create) { add(`${pf.id}:user`, 'Desired APT Sports username'); add(`${pf.id}:pass`, 'Desired password'); }
+    else add(pf.id, pf.code === 'clubgg' ? 'ClubGG ID' : pf.code === 'sportsbook' ? 'Sportsbook username' : `${pf.name} account ID`);
+  }
+  return modal;
+}
+
+export async function onSbHas(i: ButtonInteraction, has: boolean): Promise<void> {
+  await i.showModal(await accountsModal(ses(i.user.id).platforms ?? [], !has));
 }
 
 export async function onAccounts(i: ModalSubmitInteraction): Promise<void> {
@@ -62,6 +81,28 @@ export async function onAccounts(i: ModalSubmitInteraction): Promise<void> {
     for (const pid of platformIds) {
       const uid = i.fields.getTextInputValue(pid)?.trim();
       if (uid) await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pid}::uuid, ${uid})`);
+    }
+  } catch (e) { if (isUserError(e)) return void (await i.followUp({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+  await askClubsOrMethods(i, p.id);
+}
+
+/** "Make me an account" — request Sportsbook creation, claim any other platforms. */
+export async function onSbCreate(i: ModalSubmitInteraction): Promise<void> {
+  const p = await currentPlayer(i.user.id);
+  if (!p) return void (await i.reply({ ephemeral: true, content: 'Send /start to begin.' }));
+  const platformIds = ses(i.user.id).platforms ?? [];
+  const chosen = await db()<Platform[]>`select * from platforms where id = any(${db().array(platformIds)}::uuid[])`;
+  await i.reply({ ephemeral: true, content: '✅ Thanks! We\'ll set up your Sportsbook account and message you here the moment it\'s ready.' });
+  try {
+    for (const pf of chosen) {
+      if (pf.code === 'sportsbook') {
+        const user = i.fields.getTextInputValue(`${pf.id}:user`)?.trim();
+        const pass = i.fields.getTextInputValue(`${pf.id}:pass`)?.trim();
+        if (user && pass) await mutate(async (sql) => await sql`select sb_request_creation(${p.id}::uuid, ${pf.id}::uuid, ${user}, ${pass})`);
+      } else {
+        const uid = i.fields.getTextInputValue(pf.id)?.trim();
+        if (uid) await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pf.id}::uuid, ${uid})`);
+      }
     }
   } catch (e) { if (isUserError(e)) return void (await i.followUp({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
   await askClubsOrMethods(i, p.id);
