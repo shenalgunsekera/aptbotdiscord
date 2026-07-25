@@ -6,7 +6,7 @@ import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { ses } from '../session.js';
 import { money, whole, parseAmount, amountProblem, withdrawHandlePrompt, cashoutConfirm } from '../words.js';
-import { confirmedPlatforms, say, selectRow, buttonRow } from '../flows.js';
+import { confirmedPlatforms, payoutMethods, methodOption, say, selectRow, buttonRow } from '../flows.js';
 import type { PaymentMethod, WithdrawRequest } from '../core/index.js';
 
 /** /withdraw — cash out. platform → club → amount → method → handle → queue. */
@@ -68,9 +68,9 @@ export async function onAmount(i: ModalSubmitInteraction): Promise<void> {
   if (problem) return void (await i.reply({ ephemeral: true, content: problem }));
   s.outAmount = amount;
 
-  const methods = await db()<PaymentMethod[]>`select * from payment_methods where enabled and payout_enabled order by sort_order, name`;
+  const methods = await payoutMethods();
   if (methods.length === 0) return void (await i.reply({ ephemeral: true, content: 'No payout methods are available. Please contact us.' }));
-  await i.reply({ ephemeral: true, content: `Cashing out **${whole(amount)}** — how do you want to be paid?`, components: [selectRow('out:m', 'Choose method', methods.map((m) => ({ label: m.name, value: m.id })))] });
+  await i.reply({ ephemeral: true, content: `Cashing out **${whole(amount)}** — how do you want to be paid?`, components: [selectRow('out:m', 'Choose method', methods.map(methodOption))] });
 }
 
 export async function onMethod(i: StringSelectMenuInteraction): Promise<void> {

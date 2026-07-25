@@ -6,7 +6,7 @@ import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
 import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
-import { confirmedPlatforms, depositMethods, say, selectRow } from '../flows.js';
+import { confirmedPlatforms, depositMethods, methodOption, say, selectRow } from '../flows.js';
 import type { PaymentMethod, Fill } from '../core/index.js';
 
 const STRIPE_LINK = () => process.env.STRIPE_PAYMENT_LINK ?? 'https://buy.stripe.com/5kQbJ2gdf2BE9TtbGDc3m07';
@@ -53,7 +53,7 @@ async function askMethod(i: ChatInputCommandInteraction | StringSelectMenuIntera
   const methods = await depositMethods(p.id);
   if (methods.length === 0) return void (await say(i, 'No payment methods are available right now. Please contact us.'));
   if (methods.length === 1) return void (await proceed(i, platformId, methods[0]!));
-  await say(i, 'How do you want to pay?', [selectRow('add:m', 'Choose method', methods.map((m) => ({ label: m.name, value: m.id })))]);
+  await say(i, 'How do you want to pay?', [selectRow('add:m', 'Choose method', methods.map(methodOption))]);
 }
 
 export async function onMethod(i: StringSelectMenuInteraction): Promise<void> {

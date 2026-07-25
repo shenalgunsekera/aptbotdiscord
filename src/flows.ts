@@ -14,6 +14,20 @@ export async function say(i: RepliableInteraction, content: string, components: 
 
 export const isCrypto = (m: PaymentMethod) => m.reversibility === 'irreversible' && m.settlement === 'club';
 
+/** Full coin names for the crypto rails — shown as the option description so the
+ *  list reads e.g. "BTC" with "Bitcoin" underneath. */
+const CRYPTO_NAMES: Record<string, string> = {
+  btc: 'Bitcoin', eth: 'Ethereum', ltc: 'Litecoin', sol: 'Solana', xrp: 'XRP (Ripple)',
+  usdt_trc20: 'Tether — TRON (TRC-20)', usdt_erc20: 'Tether — Ethereum (ERC-20)', usdc_base: 'USD Coin — Base',
+};
+
+/** Turn a payment method into a select-menu option; crypto gets its full name as
+ *  the description. */
+export function methodOption(m: { id: string; name: string; code: string }): { label: string; value: string; description?: string } {
+  const full = CRYPTO_NAMES[m.code];
+  return full ? { label: m.name, value: m.id, description: full } : { label: m.name, value: m.id };
+}
+
 /** Platforms the player has a CONFIRMED, active account on. */
 export async function confirmedPlatforms(playerId: string): Promise<Platform[]> {
   return db()<Platform[]>`
@@ -23,14 +37,29 @@ export async function confirmedPlatforms(playerId: string): Promise<Platform[]> 
      order by pf.sort_order`;
 }
 
-/** The player's chosen deposit methods (all enabled if they never narrowed it). */
+/** The player's chosen deposit methods (all enabled if they never narrowed it),
+ *  fiat first and crypto at the bottom. */
 export async function depositMethods(playerId: string): Promise<PaymentMethod[]> {
   return db()<PaymentMethod[]>`
     select m.* from payment_methods m
      where m.enabled and (
        exists (select 1 from player_method_prefs pmp where pmp.player_id = ${playerId} and pmp.method_id = m.id)
        or not exists (select 1 from player_method_prefs pmp where pmp.player_id = ${playerId}))
-     order by m.sort_order, m.name`;
+     order by (m.reversibility = 'irreversible' and m.settlement = 'club'), m.sort_order, m.name`;
+}
+
+/** Payout-enabled methods, fiat first and crypto at the bottom. */
+export async function payoutMethods(): Promise<PaymentMethod[]> {
+  return db()<PaymentMethod[]>`
+    select m.* from payment_methods m where m.enabled and m.payout_enabled
+     order by (m.reversibility = 'irreversible' and m.settlement = 'club'), m.sort_order, m.name`;
+}
+
+/** All enabled methods, fiat first and crypto at the bottom. */
+export async function allMethods(): Promise<PaymentMethod[]> {
+  return db()<PaymentMethod[]>`
+    select m.* from payment_methods m where m.enabled
+     order by (m.reversibility = 'irreversible' and m.settlement = 'club'), m.sort_order, m.name`;
 }
 
 export function selectRow(customId: string, placeholder: string, options: { label: string; value: string; description?: string }[], opts: { min?: number; max?: number } = {}) {

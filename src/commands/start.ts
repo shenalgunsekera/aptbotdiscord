@@ -5,7 +5,7 @@ import {
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { registerPlayer, currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
-import { say, selectRow } from '../flows.js';
+import { say, selectRow, allMethods, payoutMethods, methodOption } from '../flows.js';
 import type { Player, Platform } from '../core/index.js';
 
 /** /start — begin or resume setup. Chain: name → platforms → accounts → clubs →
@@ -143,17 +143,17 @@ export async function onClubs(i: StringSelectMenuInteraction, platformId: string
 }
 
 async function askMethods(i: ModalSubmitInteraction | StringSelectMenuInteraction, playerId: string): Promise<void> {
-  const methods = await db()<{ id: string; name: string }[]>`select id, name from payment_methods where enabled order by sort_order, name`;
+  const methods = await allMethods();
   await i.followUp({ ephemeral: true, content: 'How do you want to **deposit**? Pick all you might use.',
-    components: [selectRow('ob:methods', 'Deposit methods', methods.map((m) => ({ label: m.name, value: m.id })), { min: 1, max: Math.min(25, methods.length) })] });
+    components: [selectRow('ob:methods', 'Deposit methods', methods.map(methodOption), { min: 1, max: Math.min(25, methods.length) })] });
 }
 
 export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
   const p = (await currentPlayer(i.user.id))!;
   await mutate(async (sql) => await sql`select prefs_set_deposit_methods(${p.id}::uuid, ${db().array(i.values)}::uuid[])`);
-  const payout = await db()<{ id: string; name: string }[]>`select id, name from payment_methods where enabled and payout_enabled order by sort_order, name`;
+  const payout = await payoutMethods();
   await i.update({ content: '✅ Deposit methods saved. Last step — how do you want to **get paid** when you cash out?',
-    components: [selectRow('ob:payoutm', 'Payout method', payout.map((m) => ({ label: m.name, value: m.id })))] });
+    components: [selectRow('ob:payoutm', 'Payout method', payout.map(methodOption))] });
 }
 
 export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<void> {

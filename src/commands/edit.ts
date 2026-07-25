@@ -5,10 +5,10 @@ import {
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { ses } from '../session.js';
-import { say } from '../flows.js';
+import { say, allMethods, payoutMethods, methodOption } from '../flows.js';
 import type { Player } from '../core/index.js';
 
-type Opt = { label: string; value: string; default?: boolean };
+type Opt = { label: string; value: string; description?: string; default?: boolean };
 function menu(customId: string, placeholder: string, options: Opt[], min = 1, max?: number) {
   const m = new StringSelectMenuBuilder().setCustomId(customId).setPlaceholder(placeholder)
     .setMinValues(min).setMaxValues(max ?? options.length).addOptions(options.slice(0, 25));
@@ -23,10 +23,10 @@ async function player(i: ChatInputCommandInteraction): Promise<Player | null> {
 // ── /editdeposit — which methods you deposit with ──
 export async function editDeposit(i: ChatInputCommandInteraction): Promise<void> {
   const p = await player(i); if (!p) return;
-  const methods = await db()<{ id: string; name: string }[]>`select id, name from payment_methods where enabled order by sort_order, name`;
+  const methods = await allMethods();
   const cur = new Set((await db()<{ method_id: string }[]>`select method_id from player_method_prefs where player_id = ${p.id}`).map((r) => r.method_id));
   await i.reply({ ephemeral: true, content: 'Pick the payment methods you want to **deposit** with:',
-    components: [menu('ed:methods', 'Deposit methods', methods.map((m) => ({ label: m.name, value: m.id, default: cur.has(m.id) })))] });
+    components: [menu('ed:methods', 'Deposit methods', methods.map((m) => ({ ...methodOption(m), default: cur.has(m.id) })))] });
 }
 export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
   const p = (await currentPlayer(i.user.id))!;
@@ -37,9 +37,9 @@ export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
 // ── /editwithdraw — how you get paid ──
 export async function editWithdraw(i: ChatInputCommandInteraction): Promise<void> {
   if (!(await player(i))) return;
-  const methods = await db()<{ id: string; name: string }[]>`select id, name from payment_methods where enabled and payout_enabled order by sort_order, name`;
+  const methods = await payoutMethods();
   await i.reply({ ephemeral: true, content: 'How do you want to **get paid** when you cash out?',
-    components: [menu('ed:payoutm', 'Payout method', methods.map((m) => ({ label: m.name, value: m.id })), 1, 1)] });
+    components: [menu('ed:payoutm', 'Payout method', methods.map(methodOption), 1, 1)] });
 }
 export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<void> {
   ses(i.user.id).outMethod = i.values[0]!;
