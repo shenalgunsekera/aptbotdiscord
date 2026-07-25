@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import {
   Client, GatewayIntentBits, Partials, Events, MessageFlags,
   type Interaction,
@@ -115,7 +116,16 @@ async function replyError(i: Interaction): Promise<void> {
   try { if (i.replied || i.deferred) await i.followUp(body); else await i.reply(body); } catch { /* gone */ }
 }
 
+// Tiny health server. Free hosts (Render, Koyeb) expect a web service to bind a
+// port, and an uptime pinger hitting this URL keeps a free instance from sleeping.
+// Harmless everywhere else (a VM just ignores it).
+function startHealthServer(): void {
+  const port = Number(process.env.PORT ?? 8080);
+  createServer((_req, res) => { res.writeHead(200); res.end('ok'); }).listen(port, () => console.log(`[health] listening on ${port}`));
+}
+
 async function main(): Promise<void> {
+  startHealthServer();
   await registerCommands();
   await client.login(CONFIG.token);
 }
