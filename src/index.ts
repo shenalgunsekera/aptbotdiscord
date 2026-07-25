@@ -4,7 +4,6 @@ import {
   type Interaction,
 } from 'discord.js';
 import { CONFIG } from './config.js';
-import { touchChannel } from './identity.js';
 import { registerCommands } from './register-commands.js';
 import { Notifier } from './notifier.js';
 import * as start from './commands/start.js';
@@ -30,9 +29,9 @@ client.on(Events.MessageCreate, (msg) => { void onReceiptMessage(msg).catch((e) 
 
 client.on(Events.InteractionCreate, async (i: Interaction) => {
   try {
-    if (i.channelId && (i.isChatInputCommand() || i.isMessageComponent() || i.isModalSubmit())) {
-      await touchChannel(i.user.id, i.channelId).catch(() => {});
-    }
+    // NOTE: we deliberately do NOT update the player's ticket channel here. It's
+    // anchored to wherever they ran /start, so every notification lands in that
+    // one ticket — not wherever the player happens to click next.
     if (i.isChatInputCommand()) return void (await onSlash(i));
     if (i.isStringSelectMenu() || i.isButton() || i.isModalSubmit()) return void (await onComponent(i));
   } catch (err) {
