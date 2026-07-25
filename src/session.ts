@@ -7,7 +7,19 @@
  * the player just re-runs the command. Durable state (deposits, fills, requests)
  * always lives in the database, never here.
  */
+/** What the next TYPED chat message from this player answers. Everything is
+ *  collected in chat now — no modals. */
+export type Pending =
+  | 'name' | 'acct' | 'sb_user' | 'sb_pass'
+  | 'payout_handle' | 'dep_amount' | 'wd_amount' | 'wd_handle' | 'wd_reduce'
+  | 'edit_payout' | 'edit_acct';
+
 export interface Session {
+  pending?: Pending;
+  acctQueue?: string[];       // platform ids still needing an account id (onboarding/editplatform)
+  sbCreate?: boolean;         // the queued Sportsbook account is a create-for-me
+  sbUser?: string;            // desired Sportsbook username while collecting the password
+  reduceWd?: string;          // withdraw id being partially taken back
   // onboarding
   platforms?: string[];
   clubSel?: string[];

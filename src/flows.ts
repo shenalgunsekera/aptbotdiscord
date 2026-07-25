@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle,
-  type RepliableInteraction,
+  type RepliableInteraction, type Message,
 } from 'discord.js';
 import { db } from './db.js';
 import type { PaymentMethod, Platform } from './core/index.js';
@@ -10,6 +10,18 @@ export async function say(i: RepliableInteraction, content: string, components: 
   const body = { content, components, ephemeral: true } as const;
   if (i.replied || i.deferred) await i.followUp(body);
   else await i.reply(body);
+}
+
+/** Post a visible (non-ephemeral) prompt so the player can answer by typing in chat. */
+export async function sayChat(i: RepliableInteraction, content: string): Promise<void> {
+  if (i.replied || i.deferred) await i.followUp({ content, ephemeral: false });
+  else await i.reply({ content, ephemeral: false });
+}
+
+/** Send a message into the channel a player's message came from (their ticket). */
+export async function sendChannel(msg: Message, content: string, components: any[] = []): Promise<void> {
+  const ch = msg.channel as unknown as { send?: (o: unknown) => Promise<unknown> };
+  if (ch && typeof ch.send === 'function') await ch.send({ content, components });
 }
 
 export const isCrypto = (m: PaymentMethod) => m.reversibility === 'irreversible' && m.settlement === 'club';

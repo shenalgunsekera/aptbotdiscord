@@ -1,13 +1,13 @@
 import {
-  ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle,
-  type ChatInputCommandInteraction, type StringSelectMenuInteraction, type ModalSubmitInteraction, type ButtonInteraction,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  type ChatInputCommandInteraction, type StringSelectMenuInteraction, type ButtonInteraction, type Message,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
 import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
-import { confirmedPlatforms, depositMethods, methodOption, say, selectRow } from '../flows.js';
-import type { PaymentMethod, Fill } from '../core/index.js';
+import { confirmedPlatforms, depositMethods, methodOption, say, sayChat, sendChannel, selectRow } from '../flows.js';
+import type { PaymentMethod, Fill, Player } from '../core/index.js';
 
 const STRIPE_LINK = () => process.env.STRIPE_PAYMENT_LINK ?? 'https://buy.stripe.com/5kQbJ2gdf2BE9TtbGDc3m07';
 
@@ -69,49 +69,51 @@ async function proceed(i: ChatInputCommandInteraction | StringSelectMenuInteract
   s.addPlatform = platformId;
   s.addMethod = m.id;
   if (m.code === 'stripe') return void (await stripeDeposit(i, platformId));
-  // Amount via modal (must be shown from a component/command interaction, which this is).
-  const modal = new ModalBuilder().setCustomId('add:amt').setTitle('How much?')
-    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('amount').setLabel('Amount to add (e.g. 20 or 50)').setStyle(TextInputStyle.Short).setRequired(true)));
-  await i.showModal(modal);
+  // Ask the amount IN CHAT (no popup form). The player just types a number; the
+  // message handler picks it up via session.pending.
+  s.pending = 'dep_amount';
+  const [pf] = await db()<{ name: string }[]>`select name from platforms where id = ${platformId}`;
+  await sayChat(i, `How much do you want to add to **${pf?.name}** with **${m.name}**? Just **type the number** here — like \`20\` or \`50\`.`);
 }
 
-export async function onAmount(i: ModalSubmitInteraction): Promise<void> {
-  const p = await currentPlayer(i.user.id);
-  const s = ses(i.user.id);
-  if (!p || !s.addPlatform || !s.addMethod) return void (await i.reply({ ephemeral: true, content: '/deposit again to restart.' }));
-  const amount = parseAmount(i.fields.getTextInputValue('amount'));
+/** Player typed a deposit amount in chat (session.pending === 'dep_amount'). */
+export async function onAmountText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id);
+  const s = ses(msg.author.id);
+  if (!p || !s.addPlatform || !s.addMethod) return;
+  const amount = parseAmount(text);
   const cfg = (await db()<{ min_amount: number; max_amount: number; amount_step: number }[]>`select min_amount, max_amount, amount_step from config where id`)[0]!;
-  if (amount === null) return void (await i.reply({ ephemeral: true, content: 'That doesn\'t look like an amount. Try `20` or `50`.' }));
+  if (amount === null) return void (await msg.reply('That doesn\'t look like an amount. Try `20` or `50`.'));
   const problem = amountProblem(amount, { min: cfg.min_amount, max: cfg.max_amount, step: cfg.amount_step });
-  if (problem) return void (await i.reply({ ephemeral: true, content: problem }));
+  if (problem) return void (await msg.reply(problem));
 
   const [mm] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${s.addMethod}`;
   if (mm?.code === 'cashapp' && amount < 25000) {
-    await i.reply({ ephemeral: true, content: '💵 For Cash App **under $250**, pay through our secure link and choose **Cash App Pay** on the page.' });
-    return void (await stripeDeposit(i, s.addPlatform));
+    s.pending = undefined;
+    await msg.reply('💵 For Cash App **under $250**, pay through our secure link and choose **Cash App Pay** on the page.');
+    return void (await stripeDepositChannel(msg, s.addPlatform));
   }
-  await runMatch(i, s.addPlatform, amount, s.addMethod);
+  s.pending = undefined;
+  await runMatch(msg, p, s.addPlatform, amount, s.addMethod);
 }
 
-async function runMatch(i: ModalSubmitInteraction, platformId: string, amount: number, methodId: string): Promise<void> {
-  const p = (await currentPlayer(i.user.id))!;
+async function runMatch(msg: Message, p: Player, platformId: string, amount: number, methodId: string): Promise<void> {
   let fills: Fill[];
   try {
-    const d = await mutate(async (sql) => sql<{ id: string }[]>`select id from deposit_create(${p.id}::uuid, ${platformId}::uuid, ${methodId}::uuid, ${amount}::bigint)`);
+    const d = await mutate(async (sql) => await sql<{ id: string }[]>`select id from deposit_create(${p.id}::uuid, ${platformId}::uuid, ${methodId}::uuid, ${amount}::bigint)`);
     fills = await db()<Fill[]>`select * from fills where deposit_id = ${d[0]!.id} order by seq`;
   } catch (e) {
-    clearSes(i.user.id);
-    if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` }));
+    ses(msg.author.id).pending = undefined;
+    if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`));
     console.error('deposit_create failed:', e);
-    return void (await i.reply({ ephemeral: true, content: 'Something went wrong. Nothing was charged. Try again in a moment.' }));
+    return void (await msg.reply('Something went wrong. Nothing was charged. Try again in a moment.'));
   }
   const [m] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
-  const lines: string[] = ['**💸 Send your payment now — you have 5 minutes**\n'];
+  const lines: string[] = [`**💸 Send your ${m!.name} payment now — you have 5 minutes**\n`];
   if (fills.length > 1) lines.push(`Your ${money(amount)} is split across **${fills.length} people**. Pay **each** separately:\n`);
   for (const [idx, f] of fills.entries()) {
     if (fills.length > 1) lines.push(`**── Payment ${idx + 1} of ${fills.length} ──**`);
-    lines.push(`Send: **${money(f.gross_to_send, f.currency)}**`);
+    lines.push(`Send via **${m!.name}**: **${money(f.gross_to_send, f.currency)}**`);
     if (f.gross_to_send !== f.amount) lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m!.name} fee)_`);
     lines.push(`Address: \`${f.payout_handle}\``);
     lines.push('');
@@ -119,19 +121,29 @@ async function runMatch(i: ModalSubmitInteraction, platformId: string, amount: n
   if (m?.code === 'paypal') lines.push('⚠️ **Make sure to send as Friends & Family** (not Goods & Services).\n');
   lines.push(`Once you've sent it, **send ${receiptInstruction(m!.code)}** here (upload the image) so we can confirm it.`);
   lines.push('_Changed your mind? `/canceldeposit` before you pay._');
-  ses(i.user.id).addFillId = fills[0]!.id;
-  await i.reply({ ephemeral: false, content: lines.join('\n') });
+  ses(msg.author.id).addFillId = fills[0]!.id;
+  await sendChannel(msg, lines.join('\n'));
 }
 
-async function stripeDeposit(i: any, platformId: string): Promise<void> {
+async function stripeDeposit(i: ChatInputCommandInteraction | StringSelectMenuInteraction | ButtonInteraction, platformId: string): Promise<void> {
   const cfg = (await db()<{ min_amount: number; max_amount: number }[]>`select min_amount, max_amount from config where id`)[0]!;
   ses(i.user.id).stripePlatform = platformId;
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(STRIPE_LINK()));
-  const content = `💳 **Pay by Card, Apple Pay, or Cash App Pay**\n\nTap below, enter the amount you want to add (between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}) and pay. ` +
-    `Then come back here and **upload a screenshot** of the "Thanks for your payment" screen.`;
+  const content = stripeText(cfg);
   if (i.replied || i.deferred) await i.followUp({ ephemeral: false, content, components: [row] });
   else await i.reply({ ephemeral: false, content, components: [row] });
 }
+
+async function stripeDepositChannel(msg: Message, platformId: string): Promise<void> {
+  const cfg = (await db()<{ min_amount: number; max_amount: number }[]>`select min_amount, max_amount from config where id`)[0]!;
+  ses(msg.author.id).stripePlatform = platformId;
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(STRIPE_LINK()));
+  await sendChannel(msg, stripeText(cfg), [row]);
+}
+
+const stripeText = (cfg: { min_amount: number; max_amount: number }) =>
+  `💳 **Pay by Card, Apple Pay, or Cash App Pay**\n\nTap below, enter the amount you want to add (between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}) and pay. ` +
+  `Then come back here and **upload a screenshot** of the "Thanks for your payment" screen.`;
 
 /** /canceldeposit — drop the latest un-paid deposit. */
 export async function cancelDeposit(i: ChatInputCommandInteraction): Promise<void> {

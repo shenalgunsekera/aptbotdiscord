@@ -1,11 +1,11 @@
 import {
-  ActionRowBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
-  type ChatInputCommandInteraction, type StringSelectMenuInteraction, type ModalSubmitInteraction,
+  ActionRowBuilder, StringSelectMenuBuilder,
+  type ChatInputCommandInteraction, type StringSelectMenuInteraction, type Message,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { ses } from '../session.js';
-import { say, allMethods, payoutMethods, methodOption } from '../flows.js';
+import { say, sayChat, sendChannel, allMethods, payoutMethods, methodOption } from '../flows.js';
 import type { Player } from '../core/index.js';
 
 type Opt = { label: string; value: string; description?: string; default?: boolean };
@@ -43,17 +43,17 @@ export async function editWithdraw(i: ChatInputCommandInteraction): Promise<void
 }
 export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<void> {
   ses(i.user.id).outMethod = i.values[0]!;
+  ses(i.user.id).pending = 'edit_payout';
   const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${i.values[0]!}`;
-  await i.showModal(new ModalBuilder().setCustomId('ed:payouth').setTitle(`Your ${m?.name ?? 'payout'} details`)
-    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('handle').setLabel('Where should we pay you?').setStyle(TextInputStyle.Short).setRequired(true))));
+  await i.update({ content: `**Type your ${m?.name ?? 'payout'} details** here (where we send your cash-outs).`, components: [] });
 }
-export async function onPayoutHandle(i: ModalSubmitInteraction): Promise<void> {
-  const p = (await currentPlayer(i.user.id))!;
-  const methodId = ses(i.user.id).outMethod!;
-  const handle = i.fields.getTextInputValue('handle').trim();
-  await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${handle})`);
-  await i.reply({ ephemeral: true, content: '✅ Saved how you get paid.' });
+export async function payoutHandleText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
+  if (!p || !s.outMethod) return;
+  const methodId = s.outMethod;
+  s.pending = undefined;
+  await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text})`);
+  await msg.reply('✅ Saved how you get paid.');
 }
 
 // ── /editclubs — which clubs you play in ──
@@ -114,32 +114,33 @@ export async function onPlatforms(i: StringSelectMenuInteraction): Promise<void>
   ses(i.user.id).editBlocked = blocked;
   if (added.length) {
     ses(i.user.id).editAddPlatforms = added;
-    const chosen = await db()<{ id: string; code: string; name: string }[]>`select id, code, name from platforms where id = any(${db().array(added)}::uuid[]) order by sort_order`;
-    const modal = new ModalBuilder().setCustomId('ed:pfaccounts').setTitle('New account details');
-    for (const pf of chosen.slice(0, 5)) {
-      const label = pf.code === 'clubgg' ? 'ClubGG ID' : pf.code === 'sportsbook' ? 'Sportsbook username' : `${pf.name} account ID`;
-      modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId(pf.id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(true)));
-    }
-    return void (await i.showModal(modal));
+    ses(i.user.id).pending = 'edit_acct';
+    await i.update({ content: '✅ Updating your platforms…', components: [] });
+    await askNextEditAccount((c) => i.followUp({ content: c, ephemeral: false }).then(() => {}), i.user.id);
+    return;
   }
-  await i.update({ content: doneMsg([], blocked), components: [] });
+  await i.update({ content: doneMsg(blocked), components: [] });
 }
-export async function onPfAccounts(i: ModalSubmitInteraction): Promise<void> {
-  const p = (await currentPlayer(i.user.id))!;
-  const added = ses(i.user.id).editAddPlatforms ?? [];
-  const names: string[] = [];
-  try {
-    for (const pid of added) {
-      const uid = i.fields.getTextInputValue(pid)?.trim();
-      if (uid) { await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pid}::uuid, ${uid})`); const [pf] = await db()<{ name: string }[]>`select name from platforms where id = ${pid}`; if (pf) names.push(pf.name); }
-    }
-  } catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
-  await i.reply({ ephemeral: true, content: doneMsg(names, ses(i.user.id).editBlocked ?? []) });
+
+/** Ask the next added platform's account id IN CHAT, or finish. */
+async function askNextEditAccount(send: (content: string) => Promise<void>, userId: string): Promise<void> {
+  const s = ses(userId);
+  const queue = s.editAddPlatforms ?? [];
+  if (!queue.length) { s.pending = undefined; await send('✅ Added — an admin will confirm shortly. ' + doneMsg(s.editBlocked ?? [])); return; }
+  const [pf] = await db()<{ code: string; name: string }[]>`select code, name from platforms where id = ${queue[0]!}`;
+  const label = pf?.code === 'clubgg' ? 'ClubGG ID' : pf?.code === 'sportsbook' ? 'Sportsbook username' : `${pf?.name} account ID`;
+  await send(`What's your **${label}**? Type it here.`);
 }
-function doneMsg(added: string[], blocked: string[]): string {
-  const parts: string[] = [];
-  if (added.length) parts.push(`✅ Added **${added.join(', ')}** — an admin will confirm shortly.`);
-  if (!added.length) parts.push('✅ Your platforms are updated.');
-  if (blocked.length) parts.push(`⚠️ Couldn't remove: ${blocked.join('; ')}`);
-  return parts.join('\n');
+
+export async function acctText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
+  if (!p) return; const pid = (s.editAddPlatforms ?? [])[0]; if (!pid) return;
+  try { await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pid}::uuid, ${text})`); }
+  catch (e) { if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`)); throw e; }
+  s.editAddPlatforms = (s.editAddPlatforms ?? []).slice(1);
+  await askNextEditAccount((c) => sendChannel(msg, c), msg.author.id);
+}
+
+function doneMsg(blocked: string[]): string {
+  return blocked.length ? `⚠️ Couldn't remove: ${blocked.join('; ')}` : '✅ Your platforms are updated.';
 }

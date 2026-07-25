@@ -1,9 +1,10 @@
 import { createServer } from 'node:http';
 import {
   Client, GatewayIntentBits, Partials, Events, MessageFlags,
-  type Interaction,
+  type Interaction, type Message,
 } from 'discord.js';
 import { CONFIG } from './config.js';
+import { ses } from './session.js';
 import { registerCommands } from './register-commands.js';
 import { Notifier } from './notifier.js';
 import * as start from './commands/start.js';
@@ -24,8 +25,33 @@ client.once(Events.ClientReady, (c) => {
   new Notifier(c).start();
 });
 
-// Receipts arrive as image messages in a player's ticket.
-client.on(Events.MessageCreate, (msg) => { void onReceiptMessage(msg).catch((e) => console.error('[receipt]', e)); });
+// Chat is where everything is answered: a typed message either answers a pending
+// prompt (name, amount, handle, …) or is a receipt image upload.
+client.on(Events.MessageCreate, (msg) => { void handleMessage(msg).catch((e) => console.error('[msg]', e)); });
+
+async function handleMessage(msg: Message): Promise<void> {
+  if (msg.author.bot) return;
+  const pending = ses(msg.author.id).pending;
+  const text = msg.content.trim();
+  if (pending && text) return void (await routeText(msg, pending, text));
+  await onReceiptMessage(msg);
+}
+
+async function routeText(msg: Message, pending: string, text: string): Promise<void> {
+  switch (pending) {
+    case 'name': return void (await start.nameText(msg, text));
+    case 'acct': return void (await start.acctText(msg, text));
+    case 'sb_user': return void (await start.sbUserText(msg, text));
+    case 'sb_pass': return void (await start.sbPassText(msg, text));
+    case 'payout_handle': return void (await start.payoutHandleText(msg, text));
+    case 'dep_amount': return void (await deposit.onAmountText(msg, text));
+    case 'wd_amount': return void (await withdraw.onAmountText(msg, text));
+    case 'wd_handle': return void (await withdraw.onHandleText(msg, text));
+    case 'wd_reduce': return void (await withdraw.onReduceText(msg, text));
+    case 'edit_payout': return void (await edit.payoutHandleText(msg, text));
+    case 'edit_acct': return void (await edit.acctText(msg, text));
+  }
+}
 
 client.on(Events.InteractionCreate, async (i: Interaction) => {
   try {
@@ -66,44 +92,32 @@ async function onComponent(i: any): Promise<void> {
   const arg = parts[parts.length - 1]!;         // last segment (an id) for most
   const p2 = parts.slice(2).join(':');           // remainder after head:sub
 
-  // ── onboarding ──
-  if (id === 'ob:name') return void (await start.onName(i));
+  // ── onboarding (selects + buttons; text is handled in chat) ──
   if (id === 'ob:platforms') return void (await start.onPlatforms(i));
   if (id === 'ob:sbyes') return void (await start.onSbHas(i, true));
   if (id === 'ob:sbno') return void (await start.onSbHas(i, false));
-  if (id === 'ob:accounts') return void (await start.onAccounts(i));
-  if (id === 'ob:sbcreate') return void (await start.onSbCreate(i));
   if (id.startsWith('ob:clubs:')) return void (await start.onClubs(i, parts[2]!));
   if (id === 'ob:methods') return void (await start.onMethods(i));
   if (id === 'ob:payoutm') return void (await start.onPayoutMethod(i));
-  if (id === 'ob:payouth') return void (await start.onPayoutHandle(i));
 
   // ── edit ──
   if (id === 'ed:methods') return void (await edit.onMethods(i));
   if (id === 'ed:payoutm') return void (await edit.onPayoutMethod(i));
-  if (id === 'ed:payouth') return void (await edit.onPayoutHandle(i));
   if (id === 'ed:clubpf') return void (await edit.onClubPlatform(i));
   if (id.startsWith('ed:clubs:')) return void (await edit.onClubs(i, parts[2]!));
   if (id === 'ed:platforms') return void (await edit.onPlatforms(i));
-  if (id === 'ed:pfaccounts') return void (await edit.onPfAccounts(i));
 
   // ── deposit ──
   if (id === 'add:pf') return void (await deposit.onPlatform(i));
   if (id === 'add:club') return void (await deposit.onClub(i));
   if (id === 'add:m') return void (await deposit.onMethod(i));
-  if (id === 'add:amt') return void (await deposit.onAmount(i));
 
   // ── withdraw ──
   if (id === 'out:pf') return void (await withdraw.onPlatform(i));
   if (id === 'out:club') return void (await withdraw.onClub(i));
-  if (id === 'out:amtbtn') return void (await withdraw.onAmountBtn(i));
-  if (id === 'out:amt') return void (await withdraw.onAmount(i));
   if (id === 'out:m') return void (await withdraw.onMethod(i));
-  if (id === 'out:hbtn') return void (await withdraw.onHandleBtn(i));
-  if (id === 'out:h') return void (await withdraw.onHandle(i));
   if (id.startsWith('wd:retract:')) return void (await withdraw.retract(i, arg));
   if (id.startsWith('wd:reduce:')) return void (await withdraw.reducePrompt(i, arg));
-  if (id.startsWith('wd:reduceamt:')) return void (await withdraw.reduceConfirm(i, arg));
 
   // ── admin ──
   if (id.startsWith('pl:approve:')) return void (await admin.approve(i, arg));
