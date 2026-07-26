@@ -19,6 +19,13 @@ export const COMMANDS = [
   new SlashCommandBuilder().setName('support').setDescription('Message our team'),
   new SlashCommandBuilder().setName('guide').setDescription('What each command does'),
   new SlashCommandBuilder().setName('ping').setDescription('Health check'),
+  // Admin-only, run in a player's ticket channel to correct their cash out.
+  new SlashCommandBuilder().setName('add').setDescription('(admin) Add to this player\'s cash out')
+    .addNumberOption((o) => o.setName('amount').setDescription('Amount to add, e.g. 20').setRequired(true))
+    .addStringOption((o) => o.setName('reason').setDescription('Why (optional)')),
+  new SlashCommandBuilder().setName('remove').setDescription('(admin) Remove from this player\'s cash out')
+    .addNumberOption((o) => o.setName('amount').setDescription('Amount to remove, e.g. 20').setRequired(true))
+    .addStringOption((o) => o.setName('reason').setDescription('Why (optional)')),
 ].map((c) => c.toJSON());
 
 export async function registerCommands(): Promise<void> {

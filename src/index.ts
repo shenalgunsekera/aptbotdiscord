@@ -81,6 +81,8 @@ async function onSlash(i: any): Promise<void> {
     case 'editdeposit': return void (await edit.editDeposit(i));
     case 'editwithdraw': return void (await edit.editWithdraw(i));
     case 'ping': return void (await i.reply({ ephemeral: true, content: '🏓 pong' }));
+    case 'add': return void (await admin.adjust(i, 1));
+    case 'remove': return void (await admin.adjust(i, -1));
     default: await i.reply({ ephemeral: true, content: 'Unknown command.' });
   }
 }

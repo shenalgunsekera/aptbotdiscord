@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle,
-  type ButtonInteraction, type ModalSubmitInteraction,
+  type ButtonInteraction, type ModalSubmitInteraction, type ChatInputCommandInteraction,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentAdmin } from '../identity.js';
@@ -11,7 +11,7 @@ async function admin(i: ButtonInteraction | ModalSubmitInteraction): Promise<{ i
   if (!a) { await i.reply({ ephemeral: true, content: 'Admins only.' }); return null; }
   return a;
 }
-async function fail(i: ButtonInteraction | ModalSubmitInteraction, e: unknown): Promise<void> {
+async function fail(i: ButtonInteraction | ModalSubmitInteraction | ChatInputCommandInteraction, e: unknown): Promise<void> {
   if (isUserError(e)) { await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` }); return; }
   throw e;
 }
@@ -111,6 +111,53 @@ export async function stripeCreditAmount(i: ModalSubmitInteraction, claimId: str
   if (cents === null) return void (await i.reply({ ephemeral: true, content: 'Send just the number, e.g. `50`.' }));
   try { await mutate(async (sql) => await sql`select stripe_claim_credit(${claimId}::uuid, ${a.id}::uuid, ${cents}::bigint)`); } catch (e) { return void (await fail(i, e)); }
   await i.reply({ ephemeral: false, content: `✅ Credited ${money(cents)} · by ${i.user.username}` });
+}
+
+/**
+ * /add · /remove — an admin corrects a player's OPEN cash out from inside that
+ * player's ticket channel. The player is found by the channel this is run in
+ * (discord_players.ticket_channel_id), so there's no ID to type. Runs through
+ * withdraw_adjust(): ledger-posted, audited, and the player is told.
+ */
+export async function adjust(i: ChatInputCommandInteraction, sign: 1 | -1): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+
+  const dollars = i.options.getNumber('amount', true);
+  const reason = i.options.getString('reason') ?? null;
+  const cents = Math.round(dollars * 100);
+  if (!Number.isFinite(cents) || cents <= 0) {
+    return void (await i.reply({ ephemeral: true, content: 'Enter an amount above zero, e.g. `20`.' }));
+  }
+
+  const channelId = i.channelId;
+  const [pl] = await db()<{ id: string; display_name: string | null }[]>`
+    select p.id, p.display_name from players p
+      join discord_players dp on dp.player_id = p.id
+     where dp.ticket_channel_id = ${channelId}`;
+  if (!pl) {
+    return void (await i.reply({ ephemeral: true, content: "No player is linked to this channel, so there's nothing to adjust here." }));
+  }
+  const who = pl.display_name ?? 'this player';
+
+  const [w] = await db()<{ id: string }[]>`
+    select id from withdraw_requests
+     where player_id = ${pl.id} and status in ('queued', 'partially_filled', 'filled')
+     order by created_at desc limit 1`;
+  if (!w) {
+    return void (await i.reply({ ephemeral: true, content: `${who} has no cash-outs in progress — nothing to adjust.` }));
+  }
+
+  try {
+    const [r] = await db()<{ amount: number; amount_remaining: number; currency: string }[]>`
+      select amount, amount_remaining, currency
+        from withdraw_adjust(${w.id}::uuid, ${sign * cents}::bigint, ${a.id}::uuid, ${reason})`;
+    await i.reply({
+      ephemeral: false,
+      content: `✅ ${sign > 0 ? 'Added' : 'Removed'} ${money(cents, r!.currency)} ${sign > 0 ? 'to' : 'from'} ${who}'s cash-out. ` +
+        `New total: **${money(r!.amount, r!.currency)}** (${money(r!.amount_remaining, r!.currency)} still to pay). The player has been told.`,
+    });
+  } catch (e) { return void (await fail(i, e)); }
 }
 
 function amountModal(customId: string, label: string): ModalBuilder {

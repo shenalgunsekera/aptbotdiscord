@@ -109,6 +109,12 @@ export function render(n: Notification): Rendered | null {
       return { content: `💸 **You've been paid ${m(p.amount, p.currency)}!**` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') };
     case 'withdraw.reduced_player':
       return { content: `➖ **${m(p.back, p.currency)}** is coming back to your table. Your cash out is now **${m(p.new_total, p.currency)}**.` };
+    case 'withdraw.adjusted_player':
+      return {
+        content: Number(p.delta) > 0
+          ? `➕ **${m(Number(p.delta), p.currency)}** was added to your cash out — it's now **${m(p.new_total, p.currency)}**.` + (p.reason ? `\n_${p.reason}_` : '')
+          : `➖ **${m(-Number(p.delta), p.currency)}** was taken off your cash out — it's now **${m(p.new_total, p.currency)}**.` + (p.reason ? `\n_${p.reason}_` : ''),
+      };
     case 'value.added':
       return { content: `🎰 **${m(p.delta, p.currency)} added to your account!**` };
     case 'value.taken':
@@ -171,6 +177,8 @@ export function render(n: Notification): Rendered | null {
       return { content: `↩️ **Cash out cancelled by ${p.name ?? 'a player'}** — **${m(p.amount, p.currency)}** had already come off their table; **re-load it** to reimburse.` };
     case 'withdraw.reduced':
       return { content: `➖ **Cash out lowered by ${p.name ?? 'a player'}** — they took **${m(p.amount, p.currency)}** back (now ${m(p.new_total, p.currency)}). **Re-load ${m(p.amount, p.currency)}**.` };
+    case 'withdraw.adjusted':
+      return { content: `✏️ **Cash out adjusted for ${p.name ?? 'a player'}** — ${Number(p.delta) > 0 ? 'added' : 'removed'} **${m(Math.abs(Number(p.delta)), p.currency)}** (now ${m(p.new_total, p.currency)}).` + (p.reason ? `\n_Reason: ${p.reason}_` : '') };
     case 'sportsbook.create':
       return {
         content: `🆕 **Create a Sportsbook account**\nFor: **${p.name}**\nUsername: \`${p.username}\`\nPassword: \`${p.password}\`\nCreate it, then tap below.`,
