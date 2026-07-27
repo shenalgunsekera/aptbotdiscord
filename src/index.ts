@@ -83,6 +83,8 @@ async function onSlash(i: any): Promise<void> {
     case 'ping': return void (await i.reply({ ephemeral: true, content: '🏓 pong' }));
     case 'add': return void (await admin.adjust(i, 1));
     case 'remove': return void (await admin.adjust(i, -1));
+    case 'paymentchannel': return void (await admin.setChannel(i, 'payments'));
+    case 'adminchannel': return void (await admin.setChannel(i, 'admin'));
     default: await i.reply({ ephemeral: true, content: 'Unknown command.' });
   }
 }

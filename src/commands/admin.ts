@@ -160,6 +160,25 @@ export async function adjust(i: ChatInputCommandInteraction, sign: 1 | -1): Prom
   } catch (e) { return void (await fail(i, e)); }
 }
 
+/**
+ * /paymentchannel · /adminchannel — designate the current channel. The payments
+ * feed (detected money-in) goes to the payments channel; everything else to the
+ * admin channel. Admins only.
+ */
+export async function setChannel(i: ChatInputCommandInteraction, which: 'payments' | 'admin'): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const [row] = await db()<{ discord_channel_set: boolean }[]>`
+    select discord_channel_set(${which}, ${i.channelId}, ${i.user.id})`;
+  if (!row?.discord_channel_set) return void (await i.reply({ ephemeral: true, content: '⛔ Only an admin can do that.' }));
+  await i.reply({
+    ephemeral: false,
+    content: which === 'payments'
+      ? '✅ This channel is now the **payments feed** — every detected payment lands here.'
+      : '✅ This channel is now the **admin channel** (adjustments, verifications, and everything except the payments feed).',
+  });
+}
+
 function amountModal(customId: string, label: string): ModalBuilder {
   return new ModalBuilder().setCustomId(customId).setTitle(label)
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('amount').setLabel(label).setStyle(TextInputStyle.Short).setRequired(true)));

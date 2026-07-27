@@ -29,8 +29,8 @@ export class Notifier {
 
   async tick(): Promise<number> {
     const sql = db();
-    const [cfg] = await sql<{ discord_admin_channel_id: string | null }[]>`
-      select discord_admin_channel_id from config where id`;
+    const [cfg] = await sql<{ discord_admin_channel_id: string | null; discord_payments_channel_id: string | null }[]>`
+      select discord_admin_channel_id, discord_payments_channel_id from config where id`;
 
     const rows = await sql<Notification[]>`
       with c as (
@@ -51,7 +51,9 @@ export class Notifier {
 
     let sent = 0;
     for (const n of rows) {
-      const channelId = n.audience === 'admins' ? cfg?.discord_admin_channel_id : chanFor.get(Number(n.id));
+      const channelId = n.audience === 'admins'
+        ? ((n.kind === 'payment.detected' ? cfg?.discord_payments_channel_id : null) ?? cfg?.discord_admin_channel_id)
+        : chanFor.get(Number(n.id));
       const rendered = render(n);
       if (!channelId || !rendered) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
       try {

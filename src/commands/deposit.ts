@@ -119,7 +119,7 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
     lines.push('');
   }
   if (m?.code === 'paypal') lines.push('⚠️ **Make sure to send as Friends & Family** (not Goods & Services).\n');
-  lines.push(`Once you've sent it, **send ${receiptInstruction(m!.code)}** here (upload the image) so we can confirm it.`);
+  lines.push(`Once you've sent it, send ${receiptInstruction(m!.code)} here (upload the image) so we can confirm it.`);
   lines.push('_Changed your mind? `/canceldeposit` before you pay._');
   ses(msg.author.id).addFillId = fills[0]!.id;
   await sendChannel(msg, lines.join('\n'));

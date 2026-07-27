@@ -26,6 +26,8 @@ export const COMMANDS = [
   new SlashCommandBuilder().setName('remove').setDescription('(admin) Remove from this player\'s cash out')
     .addNumberOption((o) => o.setName('amount').setDescription('Amount to remove, e.g. 20').setRequired(true))
     .addStringOption((o) => o.setName('reason').setDescription('Why (optional)')),
+  new SlashCommandBuilder().setName('paymentchannel').setDescription('(admin) Make this channel the payments feed'),
+  new SlashCommandBuilder().setName('adminchannel').setDescription('(admin) Make this channel the admin channel'),
 ].map((c) => c.toJSON());
 
 export async function registerCommands(): Promise<void> {
