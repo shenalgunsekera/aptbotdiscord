@@ -34,11 +34,21 @@ export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
   await i.update({ content: '✅ Saved your deposit methods.', components: [] });
 }
 
-// ── /editwithdraw — how you get paid ──
+// ── /editwithdraw — how you get paid. You can save SEVERAL methods (each with
+//    its own handle) — run this once per method and pick which to use at cash-out.
+async function savedPayouts(playerId: string): Promise<{ name: string; handle: string }[]> {
+  return db()<{ name: string; handle: string }[]>`
+    select distinct on (m.id) m.name,
+           first_value(h.handle) over (partition by m.id order by h.last_used_at desc nulls last, h.created_at desc) as handle
+      from payout_handles h join payment_methods m on m.id = h.method_id
+     where h.player_id = ${playerId} and m.enabled and m.payout_enabled order by m.id`;
+}
 export async function editWithdraw(i: ChatInputCommandInteraction): Promise<void> {
-  if (!(await player(i))) return;
+  const p = await player(i); if (!p) return;
   const methods = await payoutMethods();
-  await i.reply({ ephemeral: true, content: 'How do you want to **get paid** when you cash out?',
+  const saved = await savedPayouts(p.id);
+  const current = saved.length ? `**Saved:** ${saved.map((s) => `${s.name} — \`${s.handle}\``).join(', ')}\n\n` : '';
+  await i.reply({ ephemeral: true, content: `${current}Pick a method to **add or update** how you get paid (you can save more than one):`,
     components: [menu('ed:payoutm', 'Payout method', methods.map(methodOption), 1, 1)] });
 }
 export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<void> {
@@ -49,11 +59,15 @@ export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<vo
 }
 export async function payoutHandleText(msg: Message, text: string): Promise<void> {
   const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
-  if (!p || !s.outMethod) return;
+  if (!p) return;
+  // The method was picked on the ephemeral menu; if the process restarted since
+  // (Render free tier), that state is gone — tell them instead of dropping it.
+  if (!s.outMethod) return void (await msg.reply('That step expired — run `/editwithdraw` again and pick the method just before typing the handle.'));
   const methodId = s.outMethod;
-  s.pending = undefined;
+  s.pending = undefined; s.outMethod = undefined;
   await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text})`);
-  await msg.reply('✅ Saved how you get paid.');
+  const saved = await savedPayouts(p.id);
+  await sendChannel(msg, `✅ Saved. **Your payout methods:** ${saved.map((sv) => `${sv.name} — \`${sv.handle}\``).join(', ')}\n\nAdd another with \`/editwithdraw\`, or pick which to use when you \`/withdraw\`.`);
 }
 
 // ── /editclubs — which clubs you play in ──

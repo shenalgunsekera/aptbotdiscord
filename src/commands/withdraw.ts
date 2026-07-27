@@ -59,6 +59,22 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
   const problem = amountProblem(amount, { min: cfg.min_amount, max: cfg.max_amount, step: cfg.amount_step });
   if (problem) return void (await msg.reply(problem));
   s.outAmount = amount; s.pending = undefined;
+
+  // Prefer the methods the player has already saved a destination for, so someone
+  // with several set up can PICK which one — mirroring the Telegram bot. Each
+  // option shows its saved handle; picking one reuses it (see onMethod). None
+  // saved → fall back to the full payout-method list to set one up now.
+  const saved = await db()<{ id: string; name: string; handle: string }[]>`
+    select distinct on (m.id) m.id, m.name,
+           first_value(h.handle) over (partition by m.id order by h.last_used_at desc nulls last, h.created_at desc) as handle
+      from payout_handles h
+      join payment_methods m on m.id = h.method_id
+     where h.player_id = ${p.id} and m.enabled and m.payout_enabled
+     order by m.id`;
+  if (saved.length) {
+    const opts = saved.map((sv) => ({ label: sv.name, value: sv.id, description: sv.handle.slice(0, 100) }));
+    return void (await sendChannel(msg, `Cashing out **${whole(amount)}** — which payout method?`, [selectRow('out:m', 'Choose method', opts)]));
+  }
   const methods = await payoutMethods();
   if (!methods.length) return void (await msg.reply('No payout methods are available. Please contact us.'));
   await sendChannel(msg, `Cashing out **${whole(amount)}** — how do you want to be paid?`, [selectRow('out:m', 'Choose method', methods.map(methodOption))]);
