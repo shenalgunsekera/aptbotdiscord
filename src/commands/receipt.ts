@@ -56,13 +56,14 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
       const locked = await sql<{ id: string }[]>`select id from fills where deposit_id = ${f!.deposit_id} and status = 'locked' order by seq`;
       for (const lf of locked) await sql`select fill_submit_proof(${lf.id}::uuid, null, null, false)`;
       // Send the receipt to the admin channel for verification.
-      const [info] = await sql<{ amount: number; currency: string; method: string; name: string | null }[]>`
-        select f.amount, f.currency, pm.name method, dp.display_name name
+      const [info] = await sql<{ amount: number; currency: string; method: string; name: string | null; payout_handle: string | null; payout_name: string | null }[]>`
+        select f.amount, f.currency, pm.name method, dp.display_name name, f.payout_handle, f.payout_name
           from fills f join payment_methods pm on pm.id = f.method_id
           left join deposit_requests d on d.id = f.deposit_id
           left join players dp on dp.id = d.player_id where f.id = ${fillId}`;
       await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json({
         fill_id: fillId, urls: [url], amount: info?.amount, currency: info?.currency, method: info?.method, name: info?.name,
+        payout_handle: info?.payout_handle, payout_name: info?.payout_name,
       }) as any}::jsonb)`;
     });
   } catch (e) {

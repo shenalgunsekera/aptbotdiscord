@@ -44,6 +44,8 @@ async function routeText(msg: Message, pending: string, text: string): Promise<v
     case 'sb_user': return void (await start.sbUserText(msg, text));
     case 'sb_pass': return void (await start.sbPassText(msg, text));
     case 'payout_handle': return void (await start.payoutHandleText(msg, text));
+    case 'payout_name': return void (await start.payoutNameText(msg, text));
+    case 'edit_payout_name': return void (await edit.payoutNameText(msg, text));
     case 'dep_amount': return void (await deposit.onAmountText(msg, text));
     case 'wd_amount': return void (await withdraw.onAmountText(msg, text));
     case 'wd_handle': return void (await withdraw.onHandleText(msg, text));

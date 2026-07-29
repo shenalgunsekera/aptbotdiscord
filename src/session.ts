@@ -11,8 +11,8 @@
  *  collected in chat now — no modals. */
 export type Pending =
   | 'name' | 'acct' | 'sb_user' | 'sb_pass'
-  | 'payout_handle' | 'dep_amount' | 'wd_amount' | 'wd_handle' | 'wd_reduce'
-  | 'edit_payout' | 'edit_acct';
+  | 'payout_handle' | 'payout_name' | 'dep_amount' | 'wd_amount' | 'wd_handle' | 'wd_reduce'
+  | 'edit_payout' | 'edit_payout_name' | 'edit_acct';
 
 export interface Session {
   pending?: Pending;
@@ -33,6 +33,7 @@ export interface Session {
   outPlatform?: string;
   outAmount?: number;
   outMethod?: string;
+  payoutHandle?: string;   // Zelle: the handle we just saved, awaiting the holder name
   // edit flows
   editAddPlatforms?: string[];   // platforms being added via /editplatform (awaiting account ids)
   editBlocked?: string[];        // platforms that couldn't be removed (open activity)

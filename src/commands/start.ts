@@ -169,8 +169,23 @@ export async function payoutHandleText(msg: Message, text: string): Promise<void
   if (!p || !s.outMethod) return;
   const methodId = s.outMethod;
   await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text})`);
+  // Zelle is addressed by handle AND the account holder's name — collect it.
+  const [m] = await db()<{ code: string }[]>`select code from payment_methods where id = ${methodId}`;
+  if (m?.code === 'zelle') {
+    s.pending = 'payout_name'; s.payoutHandle = text.trim();
+    await msg.reply('✅ Saved your **Zelle**. Zelle also needs the **name on the account** — type the **first & last name** on your Zelle.');
+    return;
+  }
   clearSes(msg.author.id);
   await msg.reply('🎉 **All set!** An admin will confirm your account(s) shortly, then you can `/deposit` and `/withdraw`. See `/guide` anytime.');
+}
+
+export async function payoutNameText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
+  if (!p || !s.outMethod || !s.payoutHandle) return;
+  await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${s.outMethod!}::uuid, ${s.payoutHandle!}, null, ${text})`);
+  clearSes(msg.author.id);
+  await msg.reply(`🎉 **All set!** Zelle name saved (**${text.trim()}**). An admin will confirm your account(s) shortly. See \`/guide\` anytime.`);
 }
 
 function summary(name: string): EmbedBuilder {

@@ -155,6 +155,8 @@ export function render(n: Notification): Rendered | null {
       return {
         content: `🏦 **Payment to verify — receipt${urls.length > 1 ? 's' : ''} attached**\n` +
           `${p.name ? 'From: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}** (${p.method})` +
+          (p.payout_handle ? `\nTo: \`${p.payout_handle}\`` : '') +
+          (p.payout_name ? `\nName: **${p.payout_name}**` : '') +
           (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') + `\nCheck it landed, then release.`,
         embeds: imgEmbeds(urls),
         components: row(btn('✅ Verify & release', `fl:verify:${p.fill_id}`)),

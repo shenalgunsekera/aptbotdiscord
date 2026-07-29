@@ -64,10 +64,25 @@ export async function payoutHandleText(msg: Message, text: string): Promise<void
   // (Render free tier), that state is gone — tell them instead of dropping it.
   if (!s.outMethod) return void (await msg.reply('That step expired — run `/editwithdraw` again and pick the method just before typing the handle.'));
   const methodId = s.outMethod;
-  s.pending = undefined; s.outMethod = undefined;
   await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text})`);
+  // Zelle also needs the name on the account.
+  const [m] = await db()<{ code: string }[]>`select code from payment_methods where id = ${methodId}`;
+  if (m?.code === 'zelle') {
+    s.pending = 'edit_payout_name'; s.payoutHandle = text.trim();
+    return void (await msg.reply('✅ Saved your **Zelle**. Now type the **first & last name** on your Zelle account.'));
+  }
+  s.pending = undefined; s.outMethod = undefined;
   const saved = await savedPayouts(p.id);
   await sendChannel(msg, `✅ Saved. **Your payout methods:** ${saved.map((sv) => `${sv.name} — \`${sv.handle}\``).join(', ')}\n\nAdd another with \`/editwithdraw\`, or pick which to use when you \`/withdraw\`.`);
+}
+
+export async function payoutNameText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
+  if (!p || !s.outMethod || !s.payoutHandle) return void (await msg.reply('That step expired — run `/editwithdraw` again.'));
+  await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${s.outMethod!}::uuid, ${s.payoutHandle!}, null, ${text})`);
+  s.pending = undefined; s.outMethod = undefined; s.payoutHandle = undefined;
+  const saved = await savedPayouts(p.id);
+  await sendChannel(msg, `✅ Zelle name saved (**${text.trim()}**). **Your payout methods:** ${saved.map((sv) => `${sv.name} — \`${sv.handle}\``).join(', ')}`);
 }
 
 // ── /editclubs — which clubs you play in ──

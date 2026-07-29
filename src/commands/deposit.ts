@@ -116,6 +116,7 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
     lines.push(`Send via **${m!.name}**: **${money(f.gross_to_send, f.currency)}**`);
     if (f.gross_to_send !== f.amount) lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m!.name} fee)_`);
     lines.push(`Address: \`${f.payout_handle}\``);
+    if (f.payout_name) lines.push(`Name on ${m!.name}: **${f.payout_name}**`);
     lines.push('');
   }
   if (m?.code === 'paypal') lines.push('⚠️ **Make sure to send as Friends & Family** (not Goods & Services).\n');
