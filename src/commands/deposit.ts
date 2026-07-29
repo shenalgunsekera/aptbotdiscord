@@ -141,8 +141,10 @@ async function stripeDepositChannel(msg: Message, platformId: string): Promise<v
   await sendChannel(msg, stripeText(cfg), [row]);
 }
 
+// The Stripe payment link caps at $500, so show that ceiling, not the global max.
+const STRIPE_MAX_CENTS = 50000;
 const stripeText = (cfg: { min_amount: number; max_amount: number }) =>
-  `💳 **Pay by Card, Apple Pay, or Cash App Pay**\n\nTap below, enter the amount you want to add (between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}) and pay. ` +
+  `💳 **Pay by Card, Apple Pay, or Cash App Pay**\n\nTap below, enter the amount you want to add (between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay. ` +
   `Then come back here and **upload a screenshot** of the "Thanks for your payment" screen.`;
 
 /** /canceldeposit — drop the latest un-paid deposit. */
