@@ -181,7 +181,8 @@ async function askNextEditAccount(send: (content: string) => Promise<void>, user
   if (!queue.length) { s.pending = undefined; await send('✅ Added — an admin will confirm shortly. ' + doneMsg(s.editBlocked ?? [])); return; }
   const [pf] = await db()<{ code: string; name: string }[]>`select code, name from platforms where id = ${queue[0]!}`;
   const label = pf?.code === 'clubgg' ? 'ClubGG ID' : pf?.code === 'sportsbook' ? 'Sportsbook username' : `${pf?.name} account ID`;
-  await send(`What's your **${label}**? Type it here.`);
+  const eg = pf?.code === 'clubgg' ? ' _(e.g. `1234-5678`)_' : '';
+  await send(`What's your **${label}**? Type it here.${eg}`);
 }
 
 export async function acctText(msg: Message, text: string): Promise<void> {

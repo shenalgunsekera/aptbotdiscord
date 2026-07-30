@@ -83,7 +83,8 @@ async function askNextAccount(send: Sender, userId: string): Promise<void> {
   if (pf?.code === 'sportsbook' && s.sbCreate) { s.pending = 'sb_user'; await send('🆕 Pick a **username** for your new APT Sports account — type it here.'); return; }
   s.pending = 'acct';
   const label = pf?.code === 'clubgg' ? 'ClubGG ID' : pf?.code === 'sportsbook' ? 'APT Sports username' : `${pf?.name} account ID`;
-  await send(`What's your **${label}**? Type it here.`);
+  const eg = pf?.code === 'clubgg' ? ' _(e.g. `1234-5678`)_' : '';
+  await send(`What's your **${label}**? Type it here.${eg}`);
 }
 
 export async function acctText(msg: Message, text: string): Promise<void> {
