@@ -146,7 +146,7 @@ export async function onClubs(i: StringSelectMenuInteraction, platformId: string
 
 async function askMethods(send: Sender, _playerId: string): Promise<void> {
   const methods = await allMethods();
-  await send('How do you want to **deposit**? Pick all you might use.',
+  await send('Which methods do you want to use to **add money**? Pick all that apply.',
     [selectRow('ob:methods', 'Deposit methods', methods.map(methodOption), { min: 1, max: Math.min(25, methods.length) })]);
 }
 
@@ -156,7 +156,7 @@ export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
   const payout = await payoutMethods();
   // Multi-select, like Telegram: pick every way you want to be paid; we then
   // collect a handle for each in turn.
-  await i.update({ content: '✅ Deposit methods saved. Last step — how do you want to **get paid** when you cash out? Pick all you might use.',
+  await i.update({ content: "✅ Deposit methods saved. Last step — how do you want to **get paid** when you cash out? Pick all that apply — we'll save where to send each so you never re-type it.",
     components: [selectRow('ob:payoutm', 'Payout methods', payout.map(methodOption), { min: 1, max: Math.min(25, payout.length) })] });
 }
 

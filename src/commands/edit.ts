@@ -6,6 +6,7 @@ import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { ses } from '../session.js';
 import { say, sayChat, sendChannel, allMethods, payoutMethods, methodOption } from '../flows.js';
+import { withdrawHandlePrompt } from '../words.js';
 import type { Player } from '../core/index.js';
 
 type Opt = { label: string; value: string; description?: string; default?: boolean };
@@ -25,7 +26,7 @@ export async function editDeposit(i: ChatInputCommandInteraction): Promise<void>
   const p = await player(i); if (!p) return;
   const methods = await allMethods();
   const cur = new Set((await db()<{ method_id: string }[]>`select method_id from player_method_prefs where player_id = ${p.id}`).map((r) => r.method_id));
-  await i.reply({ ephemeral: true, content: 'Pick the payment methods you want to **deposit** with:',
+  await i.reply({ ephemeral: true, content: 'Which methods do you want to use to **add money**? Pick all that apply.',
     components: [menu('ed:methods', 'Deposit methods', methods.map((m) => ({ ...methodOption(m), default: cur.has(m.id) })))] });
 }
 export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
@@ -48,41 +49,63 @@ export async function editWithdraw(i: ChatInputCommandInteraction): Promise<void
   const methods = await payoutMethods();
   const saved = await savedPayouts(p.id);
   const current = saved.length ? `**Saved:** ${saved.map((s) => `${s.name} — \`${s.handle}\``).join(', ')}\n\n` : '';
-  await i.reply({ ephemeral: true, content: `${current}Pick a method to **add or update** how you get paid (you can save more than one):`,
-    components: [menu('ed:payoutm', 'Payout method', methods.map(methodOption), 1, 1)] });
+  // Multi-select + per-method handle collection, exactly like Telegram.
+  await i.reply({ ephemeral: true, content: `${current}How do you want to **get paid** when you cash out? Pick all that apply — we'll save where to send each so you never re-type it.`,
+    components: [menu('ed:payoutm', 'Payout methods', methods.map(methodOption), 1, Math.min(25, methods.length))] });
 }
 export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<void> {
-  ses(i.user.id).outMethod = i.values[0]!;
-  ses(i.user.id).pending = 'edit_payout';
-  const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${i.values[0]!}`;
-  await i.update({ content: `**Type your ${m?.name ?? 'payout'} details** here (where we send your cash-outs).`, components: [] });
+  const s = ses(i.user.id);
+  s.wdQueue = [...i.values];
+  const first = s.wdQueue.shift()!;
+  s.outMethod = first;
+  s.pending = 'edit_payout';
+  const [m] = await db()<{ code: string; name: string; club_handle: string | null }[]>`
+    select code, name, club_handle from payment_methods where id = ${first}`;
+  const more = s.wdQueue.length ? `\n\n_(${s.wdQueue.length} more after this)_` : '';
+  await i.update({ content: withdrawHandlePrompt(m!.code, m!.name, m!.club_handle) + more, components: [] });
 }
+
+/** Next chosen payout method, or finish the edit. */
+async function askNextEditPayout(msg: Message): Promise<void> {
+  const s = ses(msg.author.id);
+  const p = (await currentPlayer(msg.author.id))!;
+  s.wdQueue = s.wdQueue ?? [];
+  const next = s.wdQueue.shift();
+  if (!next) {
+    s.pending = undefined; s.outMethod = undefined; s.payoutHandle = undefined;
+    const saved = await savedPayouts(p.id);
+    await sendChannel(msg, `✅ Updated how you get paid. **Your payout methods:** ${saved.map((sv) => `${sv.name} — \`${sv.handle}\``).join(', ')}`);
+    return;
+  }
+  s.outMethod = next;
+  s.pending = 'edit_payout';
+  const [m] = await db()<{ code: string; name: string; club_handle: string | null }[]>`
+    select code, name, club_handle from payment_methods where id = ${next}`;
+  const more = s.wdQueue.length ? `\n\n_(${s.wdQueue.length} more after this)_` : '';
+  await sendChannel(msg, withdrawHandlePrompt(m!.code, m!.name, m!.club_handle) + more);
+}
+
 export async function payoutHandleText(msg: Message, text: string): Promise<void> {
   const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
   if (!p) return;
-  // The method was picked on the ephemeral menu; if the process restarted since
-  // (Render free tier), that state is gone — tell them instead of dropping it.
-  if (!s.outMethod) return void (await msg.reply('That step expired — run `/editwithdraw` again and pick the method just before typing the handle.'));
+  if (!s.outMethod) return void (await msg.reply('That step expired — run `/editwithdraw` again.'));
   const methodId = s.outMethod;
   await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text})`);
-  // Zelle also needs the name on the account.
   const [m] = await db()<{ code: string }[]>`select code from payment_methods where id = ${methodId}`;
   if (m?.code === 'zelle') {
     s.pending = 'edit_payout_name'; s.payoutHandle = text.trim();
-    return void (await msg.reply('✅ Saved your **Zelle**. Now type the **first & last name** on your Zelle account.'));
+    return void (await msg.reply('✅ Saved your **Zelle**. Zelle also needs the **name on the account** — type the **first & last name** on your Zelle.'));
   }
-  s.pending = undefined; s.outMethod = undefined;
-  const saved = await savedPayouts(p.id);
-  await sendChannel(msg, `✅ Saved. **Your payout methods:** ${saved.map((sv) => `${sv.name} — \`${sv.handle}\``).join(', ')}\n\nAdd another with \`/editwithdraw\`, or pick which to use when you \`/withdraw\`.`);
+  await msg.reply(`✅ Saved — \`${text.trim()}\`.`);
+  await askNextEditPayout(msg);
 }
 
 export async function payoutNameText(msg: Message, text: string): Promise<void> {
   const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
   if (!p || !s.outMethod || !s.payoutHandle) return void (await msg.reply('That step expired — run `/editwithdraw` again.'));
   await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${s.outMethod!}::uuid, ${s.payoutHandle!}, null, ${text})`);
-  s.pending = undefined; s.outMethod = undefined; s.payoutHandle = undefined;
-  const saved = await savedPayouts(p.id);
-  await sendChannel(msg, `✅ Zelle name saved (**${text.trim()}**). **Your payout methods:** ${saved.map((sv) => `${sv.name} — \`${sv.handle}\``).join(', ')}`);
+  await msg.reply(`✅ Zelle name saved (**${text.trim()}**).`);
+  await askNextEditPayout(msg);
 }
 
 // ── /editclubs — which clubs you play in ──
@@ -94,7 +117,7 @@ export async function editClubs(i: ChatInputCommandInteraction): Promise<void> {
        and (select count(*) from clubs c where c.platform_id = pf.id and c.enabled) > 1
      order by pf.sort_order`;
   if (!plats.length) return void (await i.reply({ ephemeral: true, content: "There aren't any other clubs to switch between right now." }));
-  if (plats.length === 1) return void (await i.reply({ ephemeral: true, content: `Which **${plats[0]!.name}** club(s) are you in?`, components: [await clubMenu(p.id, plats[0]!.id)] }));
+  if (plats.length === 1) return void (await i.reply({ ephemeral: true, content: `Which **${plats[0]!.name}** club(s) are you in? Tick to add, untick to leave.`, components: [await clubMenu(p.id, plats[0]!.id)] }));
   await i.reply({ ephemeral: true, content: "Which platform's clubs do you want to edit?",
     components: [menu('ed:clubpf', 'Choose platform', plats.map((pf) => ({ label: pf.name, value: pf.id })), 1, 1)] });
 }
@@ -118,7 +141,7 @@ export async function editPlatform(i: ChatInputCommandInteraction): Promise<void
   const p = await player(i); if (!p) return;
   const platforms = await db()<{ id: string; name: string }[]>`select id, name from platforms where enabled order by sort_order`;
   const active = new Set((await db()<{ platform_id: string }[]>`select platform_id from player_platforms where player_id = ${p.id} and active`).map((r) => r.platform_id));
-  await i.reply({ ephemeral: true, content: 'Tick the platforms you play on. Unticking one removes it; ticking a new one adds it.',
+  await i.reply({ ephemeral: true, content: 'Which platform(s) will you be using? Tick to add, untick to remove.',
     components: [menu('ed:platforms', 'Your platforms', platforms.map((pf) => ({ label: pf.name, value: pf.id, default: active.has(pf.id) })), 1)] });
 }
 export async function onPlatforms(i: StringSelectMenuInteraction): Promise<void> {
