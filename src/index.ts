@@ -128,6 +128,8 @@ async function onComponent(i: any): Promise<void> {
   // ── admin ──
   if (id.startsWith('pl:approve:')) return void (await admin.approve(i, arg));
   if (id.startsWith('fl:verify:')) return void (await admin.verify(i, arg));
+  if (id.startsWith('fv:verify:')) return void (await admin.verify(i, arg));
+  if (id.startsWith('fv:discard:')) return void (await admin.discard(i, arg));
   if (id.startsWith('lo:claim:')) return void (await admin.loaderClaim(i, arg));
   if (id.startsWith('lo:done:')) return void (await admin.loaderDone(i, parts[2]!, Number(parts[3])));
   if (id.startsWith('lo:fail:')) return void (await admin.loaderFail(i, arg));

@@ -147,8 +147,8 @@ export function render(n: Notification): Rendered | null {
     case 'fill.club_review':
     case 'fill.needs_review':
       return {
-        content: `🏦 **Money to verify** (${p.method})\n${m(p.amount, p.currency)}${p.payment_ref ? ` — ref \`${p.payment_ref}\`` : ''}\nCheck it landed, then verify.`,
-        components: row(btn('✅ Verify & release', `fl:verify:${n.ref_id}`)),
+        content: `🏦 **Money to verify** (${p.method})\n${m(p.amount, p.currency)}${p.payment_ref ? ` — ref \`${p.payment_ref}\`` : ''}\nCheck it landed, then Verify — or Discard if it didn't.`,
+        components: row(btn('✅ Verify', `fv:verify:${n.ref_id}`), btn('🗑 Discard', `fv:discard:${n.ref_id}`, ButtonStyle.Danger)),
       };
     case 'fill.receipt_admin': {
       const urls: string[] = (Array.isArray(p.urls) ? p.urls : [p.url]).filter((u: string) => u && !String(u).startsWith('telegram:'));
@@ -157,9 +157,9 @@ export function render(n: Notification): Rendered | null {
           `${p.name ? 'From: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}** (${p.method})` +
           (p.payout_handle ? `\nTo: \`${p.payout_handle}\`` : '') +
           (p.payout_name ? `\nName: **${p.payout_name}**` : '') +
-          (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') + `\nCheck it landed, then release.`,
+          (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') + `\nCheck it landed, then Verify — or Discard if it didn't.`,
         embeds: imgEmbeds(urls),
-        components: row(btn('✅ Verify & release', `fl:verify:${p.fill_id}`)),
+        components: row(btn('✅ Verify', `fv:verify:${p.fill_id}`), btn('🗑 Discard', `fv:discard:${p.fill_id}`, ButtonStyle.Danger)),
       };
     }
     case 'payment.detected': {

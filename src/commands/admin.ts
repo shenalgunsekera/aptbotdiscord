@@ -26,11 +26,34 @@ export async function approve(i: ButtonInteraction, ppId: string): Promise<void>
   await done(i, `✅ **Approved** by ${i.user.username} — the player has been told.`);
 }
 
-/** Verify & release a payment. */
+/**
+ * ✅ Verify — one message: verify & release (player is told the money's on its
+ * way), then CLAIM the loader task it created (locked to this admin) and turn the
+ * same card into Done/Failed. 🗑 Discard silently rejects (no credit).
+ */
 export async function verify(i: ButtonInteraction, fillId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select fill_admin_verify(${fillId}::uuid, ${a.id}::uuid, 'verified via discord')`); } catch (e) { return void (await fail(i, e)); }
-  await done(i, `✅ **Verified & released** · by ${i.user.username}`);
+
+  const [o] = await db()<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string }[]>`
+    select id, delta, currency, player_name, platform_uid from loader_orders
+     where ref_type='fill' and ref_id=${fillId} order by created_at desc limit 1`;
+  if (!o) return void (await i.update({ content: `✅ **Verified & released** · by ${i.user.username}`, components: [], embeds: [] }));
+
+  try { await mutate(async (sql) => await sql`select loader_order_claim(${o.id}::uuid, ${a.id}::uuid)`); } catch { /* raced */ }
+  await db()`update notifications set status='skipped' where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
+  const r = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`lo:done:${o.id}:${o.delta}`).setLabel(`✅ Done — added ${money(o.delta, o.currency)}`).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`lo:fail:${o.id}`).setLabel('❌ Failed').setStyle(ButtonStyle.Danger),
+  );
+  await i.update({ content: `🎰 **ADD ${money(o.delta, o.currency)}** to their table — Player: **${o.player_name}** \`${o.platform_uid}\`\n_Claimed by ${i.user.username}._ Add it, then:`, components: [r] });
+}
+
+/** 🗑 Discard — payment didn't land: silent reject, no credit, slice returns. */
+export async function discard(i: ButtonInteraction, fillId: string): Promise<void> {
+  const a = await admin(i); if (!a) return;
+  try { await mutate(async (sql) => await sql`select fill_admin_discard(${fillId}::uuid, ${a.id}::uuid)`); } catch (e) { return void (await fail(i, e)); }
+  await i.update({ content: `🗑 **Payment discarded** · by ${i.user.username}`, components: [], embeds: [] });
 }
 
 /** Claim a loader job → swap to do/fail actions. */
@@ -53,7 +76,7 @@ export async function loaderClaim(i: ButtonInteraction, orderId: string): Promis
 export async function loaderDone(i: ButtonInteraction, orderId: string, delta: number): Promise<void> {
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select loader_order_complete(${orderId}::uuid, ${a.id}::uuid, ${delta}::bigint, 'via discord')`); } catch (e) { return void (await fail(i, e)); }
-  await done(i, `✅ **Done** — ${delta === 0 ? 'nothing was available' : money(Math.abs(delta))} · by ${i.user.username}`);
+  await done(i, `✅ **Transaction completed by ${i.user.username}**${delta === 0 ? ' — nothing was available' : ' — ' + money(Math.abs(delta))}`);
 }
 
 export async function loaderFail(i: ButtonInteraction, orderId: string): Promise<void> {
