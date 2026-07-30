@@ -38,12 +38,19 @@ export function withdrawHandlePrompt(code: string, name: string, clubHandle?: st
   const c = clubHandle ? '`' + clubHandle + '`' : 'our PayPal';
   switch (code) {
     case 'paypal':
-      return `What's **your** PayPal email or tag? That's who we pay when you cash out (e.g. \`you@email.com\` or \`@yourtag\`). ` +
-        `When you request a cash out, send a PayPal money request to ${c} for the amount, and we'll pay it.`;
-    case 'cashapp': return `What's **your** Cash App $cashtag? (e.g. \`$yourtag\`)`;
-    case 'venmo':   return `What's **your** Venmo username? (e.g. \`@your-name\`)`;
-    case 'zelle':   return `What's **your** Zelle email or phone linked to Zelle? (e.g. \`you@email.com\`)`;
-    default:        return `What's **your** ${name} address? ⚠️ Double-check it — crypto sent to the wrong address can't come back.`;
+      return `What's **your** PayPal email or tag? Send it here — that's who we pay when you cash out.\n` +
+        `_(e.g. \`you@email.com\` or \`@yourtag\`)_\n\n` +
+        `_When you request a cash out, send a PayPal money request to ${c} for the amount, and we'll pay it._`;
+    case 'cashapp':
+      return `What's **your** Cash App $cashtag? Send it here — that's where your cash-outs go.\n_(e.g. \`$yourtag\`)_`;
+    case 'venmo':
+      return `What's **your** Venmo username? Send it here — that's where your cash-outs go.\n_(e.g. \`@your-name\`)_`;
+    case 'zelle':
+      return `What's **your** Zelle? Send the **email or phone number** linked to your Zelle — that's where your cash-outs go.\n` +
+        `_(e.g. \`you@email.com\` or \`555-123-4567\`)_`;
+    default:
+      return `What's **your** ${name} address? Send it here — that's where your cash-outs go.\n\n` +
+        `⚠️ Double-check it — crypto sent to the wrong address can't come back.`;
   }
 }
 

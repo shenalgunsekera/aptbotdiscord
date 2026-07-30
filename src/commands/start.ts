@@ -7,6 +7,7 @@ import { db, mutate, isUserError, userMessage } from '../db.js';
 import { registerPlayer, currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
 import { selectRow, allMethods, payoutMethods, methodOption, sendChannel } from '../flows.js';
+import { withdrawHandlePrompt } from '../words.js';
 import type { Platform } from '../core/index.js';
 
 /** Everything is collected in CHAT — no popup forms. Selects (dropdowns) stay,
@@ -165,9 +166,10 @@ export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<vo
   const first = s.wdQueue.shift()!;
   s.outMethod = first;
   s.pending = 'payout_handle';
-  const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${first}`;
-  const more = s.wdQueue.length ? ` _(${s.wdQueue.length} more after this)_` : '';
-  await i.update({ content: `**Type your ${m?.name ?? 'payout'} details** here (where we send your cash-outs).${more}`, components: [] });
+  const [m] = await db()<{ code: string; name: string; club_handle: string | null }[]>`
+    select code, name, club_handle from payment_methods where id = ${first}`;
+  const more = s.wdQueue.length ? `\n\n_(${s.wdQueue.length} more after this)_` : '';
+  await i.update({ content: withdrawHandlePrompt(m!.code, m!.name, m!.club_handle) + more, components: [] });
 }
 
 /** Walk to the next chosen payout method that still needs a handle, or finish. */
@@ -182,9 +184,10 @@ async function askNextPayout(msg: Message): Promise<void> {
   }
   s.outMethod = next;
   s.pending = 'payout_handle';
-  const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${next}`;
-  const more = s.wdQueue.length ? ` _(${s.wdQueue.length} more after this)_` : '';
-  await msg.reply(`Now — **type your ${m?.name ?? 'payout'} details**.${more}`);
+  const [m] = await db()<{ code: string; name: string; club_handle: string | null }[]>`
+    select code, name, club_handle from payment_methods where id = ${next}`;
+  const more = s.wdQueue.length ? `\n\n_(${s.wdQueue.length} more after this)_` : '';
+  await msg.reply(withdrawHandlePrompt(m!.code, m!.name, m!.club_handle) + more);
 }
 
 export async function payoutHandleText(msg: Message, text: string): Promise<void> {
