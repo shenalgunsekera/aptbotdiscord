@@ -153,15 +153,38 @@ export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
   const p = (await currentPlayer(i.user.id))!;
   await mutate(async (sql) => await sql`select prefs_set_deposit_methods(${p.id}::uuid, ${db().array(i.values)}::uuid[])`);
   const payout = await payoutMethods();
-  await i.update({ content: '✅ Deposit methods saved. Last step — how do you want to **get paid** when you cash out?',
-    components: [selectRow('ob:payoutm', 'Payout method', payout.map(methodOption))] });
+  // Multi-select, like Telegram: pick every way you want to be paid; we then
+  // collect a handle for each in turn.
+  await i.update({ content: '✅ Deposit methods saved. Last step — how do you want to **get paid** when you cash out? Pick all you might use.',
+    components: [selectRow('ob:payoutm', 'Payout methods', payout.map(methodOption), { min: 1, max: Math.min(25, payout.length) })] });
 }
 
 export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<void> {
-  ses(i.user.id).outMethod = i.values[0]!;
-  ses(i.user.id).pending = 'payout_handle';
-  const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${i.values[0]!}`;
-  await i.update({ content: `Almost done — **type your ${m?.name ?? 'payout'} details** here (where we send your cash-outs).`, components: [] });
+  const s = ses(i.user.id);
+  s.wdQueue = [...i.values];
+  const first = s.wdQueue.shift()!;
+  s.outMethod = first;
+  s.pending = 'payout_handle';
+  const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${first}`;
+  const more = s.wdQueue.length ? ` _(${s.wdQueue.length} more after this)_` : '';
+  await i.update({ content: `**Type your ${m?.name ?? 'payout'} details** here (where we send your cash-outs).${more}`, components: [] });
+}
+
+/** Walk to the next chosen payout method that still needs a handle, or finish. */
+async function askNextPayout(msg: Message): Promise<void> {
+  const s = ses(msg.author.id);
+  s.wdQueue = s.wdQueue ?? [];
+  const next = s.wdQueue.shift();
+  if (!next) {
+    clearSes(msg.author.id);
+    await msg.reply('🎉 **All set!** An admin will confirm your account(s) shortly, then you can `/deposit` and `/withdraw`. See `/guide` anytime.');
+    return;
+  }
+  s.outMethod = next;
+  s.pending = 'payout_handle';
+  const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${next}`;
+  const more = s.wdQueue.length ? ` _(${s.wdQueue.length} more after this)_` : '';
+  await msg.reply(`Now — **type your ${m?.name ?? 'payout'} details**.${more}`);
 }
 
 export async function payoutHandleText(msg: Message, text: string): Promise<void> {
@@ -176,16 +199,17 @@ export async function payoutHandleText(msg: Message, text: string): Promise<void
     await msg.reply('✅ Saved your **Zelle**. Zelle also needs the **name on the account** — type the **first & last name** on your Zelle.');
     return;
   }
-  clearSes(msg.author.id);
-  await msg.reply('🎉 **All set!** An admin will confirm your account(s) shortly, then you can `/deposit` and `/withdraw`. See `/guide` anytime.');
+  await msg.reply(`✅ Saved — \`${text.trim()}\`.`);
+  await askNextPayout(msg);
 }
 
 export async function payoutNameText(msg: Message, text: string): Promise<void> {
   const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
   if (!p || !s.outMethod || !s.payoutHandle) return;
   await mutate(async (sql) => await sql`select payout_handle_remember(${p.id}::uuid, ${s.outMethod!}::uuid, ${s.payoutHandle!}, null, ${text})`);
-  clearSes(msg.author.id);
-  await msg.reply(`🎉 **All set!** Zelle name saved (**${text.trim()}**). An admin will confirm your account(s) shortly. See \`/guide\` anytime.`);
+  s.payoutHandle = undefined;
+  await msg.reply(`✅ Zelle name saved (**${text.trim()}**).`);
+  await askNextPayout(msg);
 }
 
 function summary(name: string): EmbedBuilder {

@@ -24,6 +24,7 @@ export interface Session {
   platforms?: string[];
   clubSel?: string[];
   depMethods?: string[];
+  wdQueue?: string[];      // chosen payout methods still needing a handle (multi-select)
   // deposit
   addPlatform?: string;
   addMethod?: string;
