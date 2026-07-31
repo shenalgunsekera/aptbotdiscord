@@ -7,7 +7,7 @@ import { db, mutate, isUserError, userMessage } from '../db.js';
 import { registerPlayer, currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
 import { selectRow, allMethods, payoutMethods, methodOption, sendChannel } from '../flows.js';
-import { withdrawHandlePrompt } from '../words.js';
+import { withdrawHandlePrompt, COMMANDS_LIST, SETUP_COMPLETE } from '../words.js';
 import type { Platform } from '../core/index.js';
 
 /** Everything is collected in CHAT — no popup forms. Selects (dropdowns) stay,
@@ -90,8 +90,25 @@ async function askNextAccount(send: Sender, userId: string): Promise<void> {
 export async function acctText(msg: Message, text: string): Promise<void> {
   const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
   if (!p) return; const pid = (s.acctQueue ?? [])[0]; if (!pid) return;
+  const [pf] = await db()<{ code: string }[]>`select code from platforms where id = ${pid}`;
+  if (pf?.code === 'clubgg') {
+    // ClubGG: we have the ID, now ask the username; claim with both next.
+    s.pending = 'clubgg_user'; s.clubggUid = text.trim();
+    await msg.reply("What's your **ClubGG username**?");
+    return;
+  }
   try { await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pid}::uuid, ${text})`); }
   catch (e) { if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`)); throw e; }
+  s.acctQueue = (s.acctQueue ?? []).slice(1);
+  await askNextAccount(fromMessage(msg), msg.author.id);
+}
+
+export async function clubggUserText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
+  if (!p) return; const pid = (s.acctQueue ?? [])[0]; if (!pid || !s.clubggUid) return;
+  try { await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pid}::uuid, ${s.clubggUid!}, ${text.trim()})`); }
+  catch (e) { if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`)); throw e; }
+  s.clubggUid = undefined; s.pending = undefined;
   s.acctQueue = (s.acctQueue ?? []).slice(1);
   await askNextAccount(fromMessage(msg), msg.author.id);
 }
@@ -180,7 +197,7 @@ async function askNextPayout(msg: Message): Promise<void> {
   const next = s.wdQueue.shift();
   if (!next) {
     clearSes(msg.author.id);
-    await msg.reply('🎉 **All set!** An admin will confirm your account(s) shortly, then you can `/deposit` and `/withdraw`. See `/guide` anytime.');
+    await msg.reply(SETUP_COMPLETE);
     return;
   }
   s.outMethod = next;
@@ -217,6 +234,5 @@ export async function payoutNameText(msg: Message, text: string): Promise<void> 
 }
 
 function summary(name: string): EmbedBuilder {
-  return new EmbedBuilder().setTitle(`You're all set, ${name}`)
-    .setDescription('💵 `/deposit` — Add Money\n💸 `/withdraw` — Cash Out\n❓ `/guide` — List all commands');
+  return new EmbedBuilder().setTitle(`You're all set, ${name}`).setDescription(COMMANDS_LIST);
 }

@@ -10,9 +10,9 @@
 /** What the next TYPED chat message from this player answers. Everything is
  *  collected in chat now — no modals. */
 export type Pending =
-  | 'name' | 'acct' | 'sb_user' | 'sb_pass'
+  | 'name' | 'acct' | 'clubgg_user' | 'sb_user' | 'sb_pass'
   | 'payout_handle' | 'payout_name' | 'dep_amount' | 'wd_amount' | 'wd_handle' | 'wd_reduce'
-  | 'edit_payout' | 'edit_payout_name' | 'edit_acct';
+  | 'edit_payout' | 'edit_payout_name' | 'edit_acct' | 'edit_clubgg_user';
 
 export interface Session {
   pending?: Pending;
@@ -25,6 +25,7 @@ export interface Session {
   clubSel?: string[];
   depMethods?: string[];
   wdQueue?: string[];      // chosen payout methods still needing a handle (multi-select)
+  clubggUid?: string;      // ClubGG ID stashed while we ask for the username
   // deposit
   addPlatform?: string;
   addMethod?: string;

@@ -188,8 +188,24 @@ async function askNextEditAccount(send: (content: string) => Promise<void>, user
 export async function acctText(msg: Message, text: string): Promise<void> {
   const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
   if (!p) return; const pid = (s.editAddPlatforms ?? [])[0]; if (!pid) return;
+  const [pf] = await db()<{ code: string }[]>`select code from platforms where id = ${pid}`;
+  if (pf?.code === 'clubgg') {
+    s.pending = 'edit_clubgg_user'; s.clubggUid = text.trim();
+    await msg.reply("What's your **ClubGG username**?");
+    return;
+  }
   try { await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pid}::uuid, ${text})`); }
   catch (e) { if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`)); throw e; }
+  s.editAddPlatforms = (s.editAddPlatforms ?? []).slice(1);
+  await askNextEditAccount((c) => sendChannel(msg, c), msg.author.id);
+}
+
+export async function clubggUserText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
+  if (!p) return; const pid = (s.editAddPlatforms ?? [])[0]; if (!pid || !s.clubggUid) return;
+  try { await mutate(async (sql) => await sql`select player_claim_platform(${p.id}::uuid, ${pid}::uuid, ${s.clubggUid!}, ${text.trim()})`); }
+  catch (e) { if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`)); throw e; }
+  s.clubggUid = undefined; s.pending = undefined;
   s.editAddPlatforms = (s.editAddPlatforms ?? []).slice(1);
   await askNextEditAccount((c) => sendChannel(msg, c), msg.author.id);
 }

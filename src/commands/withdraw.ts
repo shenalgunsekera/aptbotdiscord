@@ -1,4 +1,5 @@
 import {
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
   type ChatInputCommandInteraction, type StringSelectMenuInteraction, type ButtonInteraction, type Message,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
@@ -119,6 +120,31 @@ async function finish(userId: string, send: (content: string) => Promise<void>, 
   }
   const amt = money(w.requested_amount, w.currency);
   await send(cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle) + '\n\nChanged your mind? Cancel it from `/pending` while it\'s still waiting.');
+}
+
+/** /cancelwithdraw — cancel a cash-out that hasn't been paid. One → cancel it;
+ *  several → buttons to pick (reuses the wd:retract handler). */
+export async function cancelWithdraw(i: ChatInputCommandInteraction): Promise<void> {
+  const p = await currentPlayer(i.user.id);
+  if (!p) return void (await say(i, 'Send `/start` to set up first.'));
+  const outs = await db()<{ id: string; amount: number | null; requested_amount: number; currency: string; status: string }[]>`
+    select id, amount, requested_amount, currency, status from withdraw_requests
+     where player_id = ${p.id} and status in ('pending_unload','queued','partially_filled')
+     order by created_at desc`;
+  if (!outs.length) return void (await say(i, "You don't have a cash-out to cancel. (Ones already paid can't be cancelled — use /support if you need help.)"));
+  if (outs.length === 1) {
+    const o = outs[0]!;
+    try { await mutate(async (sql) => await sql`select withdraw_cancel(${o.id}::uuid, null, 'cancelled by player')`); }
+    catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+    return void (await i.reply({ ephemeral: false, content: '✅ Your cash-out was cancelled. Anything not yet paid is back on your table.' }));
+  }
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    ...outs.slice(0, 5).map((o) => new ButtonBuilder()
+      .setCustomId(`wd:retract:${o.id}`)
+      .setLabel(`Cancel ${money(o.amount ?? o.requested_amount, o.currency)}`)
+      .setStyle(ButtonStyle.Danger)),
+  );
+  await i.reply({ ephemeral: false, content: 'Which cash-out do you want to cancel?', components: [row] });
 }
 
 /** ✖️ Cancel — retract a cash out (from /pending). */

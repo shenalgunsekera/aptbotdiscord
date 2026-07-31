@@ -131,7 +131,8 @@ export function render(n: Notification): Rendered | null {
       return { content: `👤 **New player** — ${p.name ?? p.username ?? p.discord_id ?? 'unknown'}\nWaiting to add their account.` };
     case 'player.claim':
       return {
-        content: `👤 **${p.name}** wants to link ${p.platform}: \`${p.uid_claimed}\`\nCheck the ID, then approve.`,
+        content: `👤 **${p.name}** wants to link ${p.platform}: \`${p.uid_claimed}\`` +
+          (p.username ? `\nUsername: \`${p.username}\`` : '') + `\nCheck the ID, then approve.`,
         components: p.pp_id ? row(btn('✅ Approve', `pl:approve:${p.pp_id}`)) : undefined,
       };
     case 'player.needs_club':

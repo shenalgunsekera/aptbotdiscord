@@ -1,3 +1,24 @@
+/** The command menu — identical text/icons/commands to the Telegram bot. */
+export const COMMANDS_LIST =
+  '💵 /deposit — add money\n' +
+  '💸 /withdraw — cash out\n' +
+  '📄 /payments — your payments & receipts\n' +
+  '📋 /pending — your account\n' +
+  '➕ /editplatform — add or remove ClubGG / Sportsbook\n' +
+  '🏆 /editclubs — change which clubs you play in\n' +
+  '💳 /editdeposit — change how you deposit\n' +
+  '🏦 /editwithdraw — change how you get paid\n' +
+  '💬 /support — message our team\n' +
+  '📖 /guide — what each command does';
+
+/** The setup-complete message — identical to the Telegram bot. */
+export const SETUP_COMPLETE =
+  '🎉 **Thank you for joining! Your account setup is now complete.**\n\n' +
+  'Join our official Telegram channel to stay updated with promotions, announcements, and news:\n' +
+  'https://t.me/AmateurPokerTour\n\n' +
+  'We look forward to having you as part of the community!\n\n' +
+  "When you're ready:\n" + COMMANDS_LIST;
+
 /**
  * Plain-language + money helpers, ported from the Telegram bot's words.ts so both
  * front-ends read identically to players.

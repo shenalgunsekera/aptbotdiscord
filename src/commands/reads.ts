@@ -9,13 +9,18 @@ import { say } from '../flows.js';
 
 const GUIDE =
   '📖 **What each command does**\n\n' +
-  '💵 `/deposit` — add money to your account.\n' +
+  '💵 `/deposit` — add money to your account. Pick where it goes, how you\'re paying, and the amount.\n' +
   '✖️ `/canceldeposit` — cancel your most recent deposit if you haven\'t paid yet.\n' +
-  '💸 `/withdraw` — cash out; we pay you the way you set up.\n' +
-  '⏳ `/pending` — deposits & cash-outs in progress (and cancel a cash-out).\n' +
-  '📄 `/payments` — your completed payments & receipts.\n\n' +
-  '**Change your setup:** `/editplatform` · `/editclubs` · `/editdeposit` · `/editwithdraw`\n' +
-  '💬 `/support` — message our team right here in your ticket.';
+  '💸 `/withdraw` — cash out. We take it off your table and pay you the way you\'ve set up.\n' +
+  '✖️ `/cancelwithdraw` — cancel a cash-out that hasn\'t been paid yet.\n' +
+  '⏳ `/pending` — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n' +
+  '📄 `/payments` — your history of completed payments and receipts.\n\n' +
+  '**Change your setup anytime:**\n' +
+  '➕ `/editplatform` — add or remove ClubGG / Sportsbook.\n' +
+  '🏆 `/editclubs` — change which clubs you play in.\n' +
+  '💳 `/editdeposit` — change which payment methods you deposit with.\n' +
+  '🏦 `/editwithdraw` — change which payment methods you cashout with.\n\n' +
+  '💬 `/support` — message our team directly.';
 
 export async function guide(i: ChatInputCommandInteraction): Promise<void> {
   await i.reply({ ephemeral: true, content: GUIDE });

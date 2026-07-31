@@ -41,6 +41,8 @@ async function routeText(msg: Message, pending: string, text: string): Promise<v
   switch (pending) {
     case 'name': return void (await start.nameText(msg, text));
     case 'acct': return void (await start.acctText(msg, text));
+    case 'clubgg_user': return void (await start.clubggUserText(msg, text));
+    case 'edit_clubgg_user': return void (await edit.clubggUserText(msg, text));
     case 'sb_user': return void (await start.sbUserText(msg, text));
     case 'sb_pass': return void (await start.sbPassText(msg, text));
     case 'payout_handle': return void (await start.payoutHandleText(msg, text));
@@ -74,6 +76,7 @@ async function onSlash(i: any): Promise<void> {
     case 'deposit': return void (await deposit.deposit(i));
     case 'canceldeposit': return void (await deposit.cancelDeposit(i));
     case 'withdraw': return void (await withdraw.withdraw(i));
+    case 'cancelwithdraw': return void (await withdraw.cancelWithdraw(i));
     case 'pending': return void (await reads.pending(i));
     case 'payments': return void (await reads.payments(i));
     case 'guide': return void (await reads.guide(i));

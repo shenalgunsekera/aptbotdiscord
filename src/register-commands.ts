@@ -10,6 +10,7 @@ export const COMMANDS = [
   new SlashCommandBuilder().setName('deposit').setDescription('Add money'),
   new SlashCommandBuilder().setName('canceldeposit').setDescription('Cancel your latest unpaid deposit'),
   new SlashCommandBuilder().setName('withdraw').setDescription('Cash out'),
+  new SlashCommandBuilder().setName('cancelwithdraw').setDescription('Cancel a cash-out that has not been paid'),
   new SlashCommandBuilder().setName('pending').setDescription('Your pending cash-outs'),
   new SlashCommandBuilder().setName('payments').setDescription('Completed payments & receipts'),
   new SlashCommandBuilder().setName('editplatform').setDescription('Add or remove ClubGG / Sportsbook'),
