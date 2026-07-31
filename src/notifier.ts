@@ -122,7 +122,7 @@ export function render(n: Notification): Rendered | null {
     case 'value.taken':
       return { content: `📤 **${m(-Number(p.delta), p.currency)} taken off your table.**` };
     case 'player.linked':
-      return { content: `🎉 **You're all set!** Your ${p.platform} account (${p.uid}) is confirmed. Use \`/deposit\` or \`/withdraw\`.` };
+      return { content: `Your ${p.platform} account (${p.uid}) is confirmed.` };
     case 'player.status_changed':
       return { content: p.status === 'active' ? `✅ Your account is active again.` : `Your account is now **${p.status}**.` + (p.reason ? `\n${p.reason}` : '') };
 

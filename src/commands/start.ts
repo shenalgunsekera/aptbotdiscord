@@ -39,7 +39,7 @@ export async function nameText(msg: Message, text: string): Promise<void> {
 
 async function askPlatforms(send: Sender): Promise<void> {
   const platforms = await db()<Platform[]>`select * from platforms where enabled order by sort_order`;
-  await send('Where do you play? Pick all that apply.',
+  await send('Which platform(s) will you be using? Tap all that apply, then Done.',
     [selectRow('ob:platforms', 'Choose platform(s)', platforms.map((pf) => ({ label: pf.name, value: pf.id })), { min: 1, max: platforms.length })]);
 }
 
@@ -80,11 +80,11 @@ async function askNextAccount(send: Sender, userId: string): Promise<void> {
     return;
   }
   const [pf] = await db()<Platform[]>`select * from platforms where id = ${queue[0]!}`;
-  if (pf?.code === 'sportsbook' && s.sbCreate) { s.pending = 'sb_user'; await send('🆕 Pick a **username** for your new APT Sports account — type it here.'); return; }
+  if (pf?.code === 'sportsbook' && s.sbCreate) { s.pending = 'sb_user'; await send('What would you like your **username** to be? (Max 10 characters)'); return; }
   s.pending = 'acct';
   const label = pf?.code === 'clubgg' ? 'ClubGG ID' : pf?.code === 'sportsbook' ? 'APT Sports username' : `${pf?.name} account ID`;
-  const eg = pf?.code === 'clubgg' ? ' _(e.g. `1234-5678`)_' : '';
-  await send(`What's your **${label}**? Type it here.${eg}`);
+  const eg = pf?.code === 'clubgg' ? '\n(e.g. 1234-5678)' : '';
+  await send(`What's your **${label}**?${eg}`);
 }
 
 export async function acctText(msg: Message, text: string): Promise<void> {
@@ -98,7 +98,7 @@ export async function acctText(msg: Message, text: string): Promise<void> {
 
 export async function sbUserText(msg: Message, text: string): Promise<void> {
   const s = ses(msg.author.id); s.sbUser = text; s.pending = 'sb_pass';
-  await msg.reply('And a **password** for it — type it here. _(You can change it later.)_');
+  await msg.reply('What would you like your **password** to be? (Max 10 characters)');
 }
 export async function sbPassText(msg: Message, text: string): Promise<void> {
   const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
@@ -134,7 +134,7 @@ async function askClubsOrMethods(send: Sender, playerId: string): Promise<void> 
     return void (await askMethods(send, playerId));
   }
   const clubs = await db()<{ id: string; name: string }[]>`select id, name from clubs where platform_id = ${next[0]!.id} and enabled order by name`;
-  await send(`Which **${next[0]!.name}** club(s) do you play in?`,
+  await send(`Which **${next[0]!.name}** club(s) will you be using? Tap all that apply, then Done.`,
     [selectRow(`ob:clubs:${next[0]!.id}`, 'Choose club(s)', clubs.map((c) => ({ label: c.name, value: c.id })), { min: 1, max: clubs.length })]);
 }
 
@@ -147,7 +147,7 @@ export async function onClubs(i: StringSelectMenuInteraction, platformId: string
 
 async function askMethods(send: Sender, _playerId: string): Promise<void> {
   const methods = await allMethods();
-  await send('Which methods do you want to use to **add money**? Pick all that apply.',
+  await send('Which methods do you want to use to deposit? Tap all that apply, then Done.',
     [selectRow('ob:methods', 'Deposit methods', methods.map(methodOption), { min: 1, max: Math.min(25, methods.length) })]);
 }
 
@@ -157,7 +157,7 @@ export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
   const payout = await payoutMethods();
   // Multi-select, like Telegram: pick every way you want to be paid; we then
   // collect a handle for each in turn.
-  await i.update({ content: "✅ Deposit methods saved. Last step — how do you want to **get paid** when you cash out? Pick all that apply — we'll save where to send each so you never re-type it.",
+  await i.update({ content: '✅ Deposit methods saved. Which methods do you want to use to withdraw? Tap all that apply, then Done.',
     components: [selectRow('ob:payoutm', 'Payout methods', payout.map(methodOption), { min: 1, max: Math.min(25, payout.length) })] });
 }
 
@@ -200,7 +200,7 @@ export async function payoutHandleText(msg: Message, text: string): Promise<void
   const [m] = await db()<{ code: string }[]>`select code from payment_methods where id = ${methodId}`;
   if (m?.code === 'zelle') {
     s.pending = 'payout_name'; s.payoutHandle = text.trim();
-    await msg.reply('✅ Saved your **Zelle**. Zelle also needs the **name on the account** — type the **first & last name** on your Zelle.');
+    await msg.reply('✅ Saved your **Zelle**. What is the first and last name associated with that Zelle account?');
     return;
   }
   await msg.reply(`✅ Saved — \`${text.trim()}\`.`);
@@ -218,5 +218,5 @@ export async function payoutNameText(msg: Message, text: string): Promise<void> 
 
 function summary(name: string): EmbedBuilder {
   return new EmbedBuilder().setTitle(`You're all set, ${name}`)
-    .setDescription('💵 `/deposit` — add money\n💸 `/withdraw` — cash out\n📋 `/pending` — your account\n📖 `/guide` — what each command does');
+    .setDescription('💵 `/deposit` — Add Money\n💸 `/withdraw` — Cash Out\n❓ `/guide` — List all commands');
 }

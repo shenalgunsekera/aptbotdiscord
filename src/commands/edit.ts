@@ -26,7 +26,7 @@ export async function editDeposit(i: ChatInputCommandInteraction): Promise<void>
   const p = await player(i); if (!p) return;
   const methods = await allMethods();
   const cur = new Set((await db()<{ method_id: string }[]>`select method_id from player_method_prefs where player_id = ${p.id}`).map((r) => r.method_id));
-  await i.reply({ ephemeral: true, content: 'Which methods do you want to use to **add money**? Pick all that apply.',
+  await i.reply({ ephemeral: true, content: 'Which methods do you want to use to deposit? Tap all that apply, then Done.',
     components: [menu('ed:methods', 'Deposit methods', methods.map((m) => ({ ...methodOption(m), default: cur.has(m.id) })))] });
 }
 export async function onMethods(i: StringSelectMenuInteraction): Promise<void> {
@@ -50,7 +50,7 @@ export async function editWithdraw(i: ChatInputCommandInteraction): Promise<void
   const saved = await savedPayouts(p.id);
   const current = saved.length ? `**Saved:** ${saved.map((s) => `${s.name} — \`${s.handle}\``).join(', ')}\n\n` : '';
   // Multi-select + per-method handle collection, exactly like Telegram.
-  await i.reply({ ephemeral: true, content: `${current}How do you want to **get paid** when you cash out? Pick all that apply — we'll save where to send each so you never re-type it.`,
+  await i.reply({ ephemeral: true, content: `${current}Which methods do you want to use to withdraw? Tap all that apply, then Done.`,
     components: [menu('ed:payoutm', 'Payout methods', methods.map(methodOption), 1, Math.min(25, methods.length))] });
 }
 export async function onPayoutMethod(i: StringSelectMenuInteraction): Promise<void> {
@@ -94,7 +94,7 @@ export async function payoutHandleText(msg: Message, text: string): Promise<void
   const [m] = await db()<{ code: string }[]>`select code from payment_methods where id = ${methodId}`;
   if (m?.code === 'zelle') {
     s.pending = 'edit_payout_name'; s.payoutHandle = text.trim();
-    return void (await msg.reply('✅ Saved your **Zelle**. Zelle also needs the **name on the account** — type the **first & last name** on your Zelle.'));
+    return void (await msg.reply('✅ Saved your **Zelle**. What is the first and last name associated with that Zelle account?'));
   }
   await msg.reply(`✅ Saved — \`${text.trim()}\`.`);
   await askNextEditPayout(msg);
@@ -117,7 +117,7 @@ export async function editClubs(i: ChatInputCommandInteraction): Promise<void> {
        and (select count(*) from clubs c where c.platform_id = pf.id and c.enabled) > 1
      order by pf.sort_order`;
   if (!plats.length) return void (await i.reply({ ephemeral: true, content: "There aren't any other clubs to switch between right now." }));
-  if (plats.length === 1) return void (await i.reply({ ephemeral: true, content: `Which **${plats[0]!.name}** club(s) are you in? Tick to add, untick to leave.`, components: [await clubMenu(p.id, plats[0]!.id)] }));
+  if (plats.length === 1) return void (await i.reply({ ephemeral: true, content: `Which **${plats[0]!.name}** club(s) will you be using? Tap all that apply, then Done.`, components: [await clubMenu(p.id, plats[0]!.id)] }));
   await i.reply({ ephemeral: true, content: "Which platform's clubs do you want to edit?",
     components: [menu('ed:clubpf', 'Choose platform', plats.map((pf) => ({ label: pf.name, value: pf.id })), 1, 1)] });
 }
@@ -128,7 +128,7 @@ async function clubMenu(playerId: string, platformId: string) {
 }
 export async function onClubPlatform(i: StringSelectMenuInteraction): Promise<void> {
   const p = (await currentPlayer(i.user.id))!;
-  await i.update({ content: 'Pick your club(s):', components: [await clubMenu(p.id, i.values[0]!)] });
+  await i.update({ content: 'Which club(s) will you be using? Tap all that apply, then Done.', components: [await clubMenu(p.id, i.values[0]!)] });
 }
 export async function onClubs(i: StringSelectMenuInteraction, platformId: string): Promise<void> {
   const p = (await currentPlayer(i.user.id))!;
@@ -141,7 +141,7 @@ export async function editPlatform(i: ChatInputCommandInteraction): Promise<void
   const p = await player(i); if (!p) return;
   const platforms = await db()<{ id: string; name: string }[]>`select id, name from platforms where enabled order by sort_order`;
   const active = new Set((await db()<{ platform_id: string }[]>`select platform_id from player_platforms where player_id = ${p.id} and active`).map((r) => r.platform_id));
-  await i.reply({ ephemeral: true, content: 'Which platform(s) will you be using? Tick to add, untick to remove.',
+  await i.reply({ ephemeral: true, content: 'Which platform(s) will you be using? Tap all that apply, then Done.',
     components: [menu('ed:platforms', 'Your platforms', platforms.map((pf) => ({ label: pf.name, value: pf.id, default: active.has(pf.id) })), 1)] });
 }
 export async function onPlatforms(i: StringSelectMenuInteraction): Promise<void> {
@@ -181,8 +181,8 @@ async function askNextEditAccount(send: (content: string) => Promise<void>, user
   if (!queue.length) { s.pending = undefined; await send('✅ Added — an admin will confirm shortly. ' + doneMsg(s.editBlocked ?? [])); return; }
   const [pf] = await db()<{ code: string; name: string }[]>`select code, name from platforms where id = ${queue[0]!}`;
   const label = pf?.code === 'clubgg' ? 'ClubGG ID' : pf?.code === 'sportsbook' ? 'Sportsbook username' : `${pf?.name} account ID`;
-  const eg = pf?.code === 'clubgg' ? ' _(e.g. `1234-5678`)_' : '';
-  await send(`What's your **${label}**? Type it here.${eg}`);
+  const eg = pf?.code === 'clubgg' ? '\n(e.g. 1234-5678)' : '';
+  await send(`What's your **${label}**?${eg}`);
 }
 
 export async function acctText(msg: Message, text: string): Promise<void> {
