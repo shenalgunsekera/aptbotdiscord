@@ -93,7 +93,7 @@ export function render(n: Notification): Rendered | null {
     case 'fill.released':
       return { content: `✅ **${m(p.credit, p.currency)} is on its way to your table.**` };
     case 'fill.settled':
-      return { content: `✅ **${m(p.amount, p.currency)} — that part of your cash out is done.**` };
+      return { content: `✅ **${m(p.amount, p.currency)} — that part of your cash-out is done.**` };
     case 'fill.lock_expired':
       return { content: `⏱ **Your payment timed out.** The ${m(p.amount, p.currency)} went back in the queue. If you already sent it, message us now.` };
     case 'withdraw.queued':
@@ -101,21 +101,21 @@ export function render(n: Notification): Rendered | null {
         content: (p.short
           ? `✅ We got **${m(p.amount, p.currency)}** off your table (of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
           : `✅ **${m(p.amount, p.currency)}** is ready and you're in line to be paid.`),
-        components: row(btn('✖️ Cancel this cash out', `wd:retract:${n.ref_id}`, ButtonStyle.Danger)),
+        components: row(btn('✖️ Cancel this cash-out', `wd:retract:${n.ref_id}`, ButtonStyle.Danger)),
       };
     case 'withdraw.completed':
-      return { content: `🎉 **Cash out complete!** ${m(p.amount, p.currency)} — all done.` };
+      return { content: `🎉 **Cash-out complete!** ${m(p.amount, p.currency)} — all done.` };
     case 'withdraw.cancelled':
-      return { content: `Your cash out was cancelled and everything's back where it was.` };
+      return { content: `Your cash-out was cancelled and everything's back where it was.` };
     case 'withdraw.paid':
       return { content: `💸 **You've been paid ${m(p.amount, p.currency)}!**` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') };
     case 'withdraw.reduced_player':
-      return { content: `➖ **${m(p.back, p.currency)}** is coming back to your table. Your cash out is now **${m(p.new_total, p.currency)}**.` };
+      return { content: `➖ **${m(p.back, p.currency)}** is coming back to your table. Your cash-out is now **${m(p.new_total, p.currency)}**.` };
     case 'withdraw.adjusted_player':
       return {
         content: Number(p.delta) > 0
-          ? `➕ **${m(Number(p.delta), p.currency)}** was added to your cash out — it's now **${m(p.new_total, p.currency)}**.` + (p.reason ? `\n_${p.reason}_` : '')
-          : `➖ **${m(-Number(p.delta), p.currency)}** was taken off your cash out — it's now **${m(p.new_total, p.currency)}**.` + (p.reason ? `\n_${p.reason}_` : ''),
+          ? `➕ **${m(Number(p.delta), p.currency)}** was added to your cash-out — it's now **${m(p.new_total, p.currency)}**.` + (p.reason ? `\n_${p.reason}_` : '')
+          : `➖ **${m(-Number(p.delta), p.currency)}** was taken off your cash-out — it's now **${m(p.new_total, p.currency)}**.` + (p.reason ? `\n_${p.reason}_` : ''),
       };
     case 'value.added':
       return { content: `🎰 **${m(p.delta, p.currency)} added to your account!**` };
@@ -179,11 +179,11 @@ export function render(n: Notification): Rendered | null {
         components: p.amount ? row(btn(`✅ Verify & Credit ${m(p.amount, p.currency)}`, `st:ok:${p.claim_id}`)) : row(btn('💵 Credit (enter amount)', `st:credit:${p.claim_id}`, ButtonStyle.Primary)),
       };
     case 'withdraw.retracted':
-      return { content: `↩️ **Cash out cancelled by ${p.name ?? 'a player'}** — **${m(p.amount, p.currency)}** had already come off their table; **re-load it** to reimburse.` };
+      return { content: `↩️ **Cash-out cancelled by ${p.name ?? 'a player'}** — **${m(p.amount, p.currency)}** had already come off their table; **re-load it** to reimburse.` };
     case 'withdraw.reduced':
-      return { content: `➖ **Cash out lowered by ${p.name ?? 'a player'}** — they took **${m(p.amount, p.currency)}** back (now ${m(p.new_total, p.currency)}). **Re-load ${m(p.amount, p.currency)}**.` };
+      return { content: `➖ **Cash-out lowered by ${p.name ?? 'a player'}** — they took **${m(p.amount, p.currency)}** back (now ${m(p.new_total, p.currency)}). **Re-load ${m(p.amount, p.currency)}**.` };
     case 'withdraw.adjusted':
-      return { content: `✏️ **Cash out adjusted for ${p.name ?? 'a player'}** — ${Number(p.delta) > 0 ? 'added' : 'removed'} **${m(Math.abs(Number(p.delta)), p.currency)}** (now ${m(p.new_total, p.currency)}).` + (p.reason ? `\n_Reason: ${p.reason}_` : '') };
+      return { content: `✏️ **Cash-out adjusted for ${p.name ?? 'a player'}** — ${Number(p.delta) > 0 ? 'added' : 'removed'} **${m(Math.abs(Number(p.delta)), p.currency)}** (now ${m(p.new_total, p.currency)}).` + (p.reason ? `\n_Reason: ${p.reason}_` : '') };
     case 'sportsbook.create':
       return {
         content: `🆕 **Create a Sportsbook account**\nFor: **${p.name}**\nUsername: \`${p.username}\`\nPassword: \`${p.password}\`\nCreate it, then tap below.`,
@@ -191,8 +191,8 @@ export function render(n: Notification): Rendered | null {
       };
     case 'withdraw.needs_payout':
       return String(p.method).toLowerCase().includes('paypal')
-        ? { content: `💸 **PayPal cash out — approve a request**\nFrom: **${p.name}**\nAmount: **${m(p.amount, p.currency)}**\nApprove & pay their money request, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) }
-        : { content: `💸 **Cash out to pay** (${p.method})\n${p.name ? 'To: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}**\nSend to: \`${p.handle}\` _(tap to copy)_\nPay it, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) };
+        ? { content: `💸 **PayPal cash-out — approve a request**\nFrom: **${p.name}**\nAmount: **${m(p.amount, p.currency)}**\nApprove & pay their money request, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) }
+        : { content: `💸 **Cash-out to pay** (${p.method})\n${p.name ? 'To: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}**\nSend to: \`${p.handle}\` _(tap to copy)_\nPay it, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) };
     case 'loader.delivery_failed':
       return { content: `⚠️ **Couldn't add value** to ${p.player_name} (\`${p.platform_uid}\`) — ${m(p.delta, p.currency)}\n_${p.reason}_ — needs a human.` };
     default:

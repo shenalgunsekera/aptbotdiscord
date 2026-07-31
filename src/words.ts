@@ -1,7 +1,7 @@
 /** The command menu — identical text/icons/commands to the Telegram bot. */
 export const COMMANDS_LIST =
   '💵 /deposit — add money\n' +
-  '💸 /withdraw — cash out\n' +
+  '💸 /withdraw — cash-out\n' +
   '📄 /payments — your payments & receipts\n' +
   '📋 /pending — your account\n' +
   '➕ /editplatform — add or remove ClubGG / Sportsbook\n' +
@@ -84,8 +84,8 @@ export function cashoutConfirm(code: string, methodName: string, handle: string,
   switch (code) {
     case 'cashapp':
     case 'paypal':
-      return `✅ **Cash out started!**\n\nPlease request **${amount}** from ${club}${copy} on ${methodName}. Your request will be fulfilled in less than 24 hours.`;
+      return `✅ **Cash-out started!**\n\nPlease request **${amount}** from ${club}${copy} on ${methodName}. Your request will be fulfilled in less than 24 hours.`;
     default:
-      return `✅ **Cash out started!**\n\nYour ${methodName} \`${handle}\` has been added to the queue. You'll receive **${amount}** within 24 hours.`;
+      return `✅ **Cash-out started!**\n\nYour ${methodName} \`${handle}\` has been added to the queue. You'll receive **${amount}** within 24 hours.`;
   }
 }

@@ -11,7 +11,7 @@ const GUIDE =
   '📖 **What each command does**\n\n' +
   '💵 `/deposit` — add money to your account. Pick where it goes, how you\'re paying, and the amount.\n' +
   '✖️ `/canceldeposit` — cancel your most recent deposit if you haven\'t paid yet.\n' +
-  '💸 `/withdraw` — cash out. We take it off your table and pay you the way you\'ve set up.\n' +
+  '💸 `/withdraw` — cash-out. We take it off your table and pay you the way you\'ve set up.\n' +
   '✖️ `/cancelwithdraw` — cancel a cash-out that hasn\'t been paid yet.\n' +
   '⏳ `/pending` — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n' +
   '📄 `/payments` — your history of completed payments and receipts.\n\n' +
@@ -19,7 +19,7 @@ const GUIDE =
   '➕ `/editplatform` — add or remove ClubGG / Sportsbook.\n' +
   '🏆 `/editclubs` — change which clubs you play in.\n' +
   '💳 `/editdeposit` — change which payment methods you deposit with.\n' +
-  '🏦 `/editwithdraw` — change which payment methods you cashout with.\n\n' +
+  '🏦 `/editwithdraw` — change which payment methods you cash-out with.\n\n' +
   '💬 `/support` — message our team directly.';
 
 export async function guide(i: ChatInputCommandInteraction): Promise<void> {

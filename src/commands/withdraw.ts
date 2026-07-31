@@ -9,7 +9,7 @@ import { money, whole, parseAmount, amountProblem, withdrawHandlePrompt, cashout
 import { confirmedPlatforms, payoutMethods, methodOption, say, sayChat, sendChannel, selectRow } from '../flows.js';
 import type { PaymentMethod, WithdrawRequest } from '../core/index.js';
 
-/** /withdraw — cash out. platform → club → amount(chat) → method → handle(chat) → queue. */
+/** /withdraw — cash-out. platform → club → amount(chat) → method → handle(chat) → queue. */
 export async function withdraw(i: ChatInputCommandInteraction): Promise<void> {
   const p = await currentPlayer(i.user.id);
   if (!p) return void (await say(i, 'Send `/start` to set up first.'));
@@ -17,7 +17,7 @@ export async function withdraw(i: ChatInputCommandInteraction): Promise<void> {
   const platforms = await confirmedPlatforms(p.id);
   if (platforms.length === 0) return void (await say(i, "You don't have a confirmed account on any platform yet. `/start` first."));
   if (platforms.length === 1) return void (await afterPlatform(i, platforms[0]!.id));
-  await say(i, 'Where do you want to cash out from?', [selectRow('out:pf', 'Choose platform', platforms.map((pf) => ({ label: pf.name, value: pf.id })))]);
+  await say(i, 'Where do you want to cash-out from?', [selectRow('out:pf', 'Choose platform', platforms.map((pf) => ({ label: pf.name, value: pf.id })))]);
 }
 
 export async function onPlatform(i: StringSelectMenuInteraction): Promise<void> {
@@ -48,7 +48,7 @@ export async function onClub(i: StringSelectMenuInteraction): Promise<void> {
 /** Ask the amount IN CHAT. */
 async function promptAmount(i: ChatInputCommandInteraction | StringSelectMenuInteraction): Promise<void> {
   ses(i.user.id).pending = 'wd_amount';
-  await sayChat(i, 'How much do you want to cash out? Just **type the number** here — like `50`.');
+  await sayChat(i, 'How much do you want to cash-out? Just **type the number** here — like `50`.');
 }
 
 export async function onAmountText(msg: Message, text: string): Promise<void> {
@@ -147,13 +147,13 @@ export async function cancelWithdraw(i: ChatInputCommandInteraction): Promise<vo
   await i.reply({ ephemeral: false, content: 'Which cash-out do you want to cancel?', components: [row] });
 }
 
-/** ✖️ Cancel — retract a cash out (from /pending). */
+/** ✖️ Cancel — retract a cash-out (from /pending). */
 export async function retract(i: ButtonInteraction, withdrawId: string): Promise<void> {
   const p = await currentPlayer(i.user.id);
   if (!p) return;
   const [w] = await db()<{ status: string }[]>`select status from withdraw_requests where id = ${withdrawId} and player_id = ${p.id}`;
-  if (!w) return void (await i.reply({ ephemeral: true, content: "Can't find that cash out." }));
-  if (['completed', 'cancelled'].includes(w.status)) return void (await i.reply({ ephemeral: true, content: `That cash out is already ${w.status}.` }));
+  if (!w) return void (await i.reply({ ephemeral: true, content: "Can't find that cash-out." }));
+  if (['completed', 'cancelled'].includes(w.status)) return void (await i.reply({ ephemeral: true, content: `That cash-out is already ${w.status}.` }));
   try { await mutate(async (sql) => await sql`select withdraw_cancel(${withdrawId}::uuid, null, 'retracted by player')`); }
   catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
   await i.reply({ ephemeral: false, content: '✅ Cancelled. If any amount was taken from your account, it will be reimbursed.' });

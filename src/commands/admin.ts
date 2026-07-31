@@ -97,7 +97,7 @@ export async function loaderShortAmount(i: ModalSubmitInteraction, orderId: stri
   await i.reply({ ephemeral: false, content: `✅ Recorded ${money(cents)} · by ${i.user.username}` });
 }
 
-/** "I paid it" on a cash out → ask for the reference. */
+/** "I paid it" on a cash-out → ask for the reference. */
 export async function withdrawPay(i: ButtonInteraction, withdrawId: string): Promise<void> {
   if (!(await admin(i))) return;
   await i.showModal(new ModalBuilder().setCustomId(`wd:payref:${withdrawId}`).setTitle('Payment reference')
@@ -137,7 +137,7 @@ export async function stripeCreditAmount(i: ModalSubmitInteraction, claimId: str
 }
 
 /**
- * /add · /remove — an admin corrects a player's OPEN cash out from inside that
+ * /add · /remove — an admin corrects a player's OPEN cash-out from inside that
  * player's ticket channel. The player is found by the channel this is run in
  * (discord_players.ticket_channel_id), so there's no ID to type. Runs through
  * withdraw_adjust(): ledger-posted, audited, and the player is told.
