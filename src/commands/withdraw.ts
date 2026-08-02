@@ -120,7 +120,7 @@ async function finish(userId: string, send: (content: string) => Promise<void>, 
     return void (await send('Something went wrong. Nothing was taken from your account. Try again shortly.'));
   }
   const amt = money(w.requested_amount, w.currency);
-  await send(cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle) + '\n\nChanged your mind? Cancel it from `/pending` while it\'s still waiting.');
+  await send(cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle));
 }
 
 type WOut = { id: string; requested_amount: number; amount_remaining: number; currency: string; status: string };

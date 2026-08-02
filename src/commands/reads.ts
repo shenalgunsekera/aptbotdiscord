@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder,
+  EmbedBuilder,
   type ChatInputCommandInteraction,
 } from 'discord.js';
 import { db } from '../db.js';
@@ -61,16 +61,9 @@ export async function pending(i: ChatInputCommandInteraction): Promise<void> {
   }
   if (!lines.length) lines.push('Nothing in progress right now.');
 
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  const cancellable = outs.filter((o) => ['pending_unload', 'queued', 'partially_filled'].includes(o.status));
-  for (const o of cancellable.slice(0, 5)) {
-    const r = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`wd:retract:${o.id}`).setLabel(`✖️ Cancel ${money(o.amount ?? o.requested_amount, o.currency)}`).setStyle(ButtonStyle.Danger));
-    if (o.method_code !== 'paypal' && o.method_code !== 'cashapp' && ['queued', 'partially_filled'].includes(o.status))
-      r.addComponents(new ButtonBuilder().setCustomId(`wd:reduce:${o.id}`).setLabel('➖ Take some back').setStyle(ButtonStyle.Secondary));
-    rows.push(r);
-  }
-  await i.reply({ ephemeral: true, content: lines.join('\n'), components: rows });
+  // We don't push cancellation here — /pending just shows status. A player who
+  // genuinely wants to cancel uses /cancelwithdraw.
+  await i.reply({ ephemeral: true, content: lines.join('\n') });
 }
 
 /** /payments — completed history. */

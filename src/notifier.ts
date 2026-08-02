@@ -120,10 +120,9 @@ export function render(n: Notification): Rendered | null {
       return { content: `⏱ **Your payment timed out.** The ${m(p.amount, p.currency)} went back in the queue. If you already sent it, message us now.` };
     case 'withdraw.queued':
       return {
-        content: (p.short
+        content: p.short
           ? `✅ We got **${m(p.amount, p.currency)}** off your table (of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
-          : `✅ **${m(p.amount, p.currency)}** is ready and you're in line to be paid.`),
-        components: row(btn('✖️ Cancel this cash-out', `wd:retract:${n.ref_id}`, ButtonStyle.Danger)),
+          : `✅ **${m(p.amount, p.currency)}** is ready and you're in line to be paid.`,
       };
     case 'withdraw.completed':
       return { content: `🎉 **Cash-out complete!** ${m(p.amount, p.currency)} — all done.` };
