@@ -1,9 +1,10 @@
 import {
   ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle,
-  type ButtonInteraction, type ModalSubmitInteraction, type ChatInputCommandInteraction,
+  type ButtonInteraction, type ModalSubmitInteraction, type ChatInputCommandInteraction, type Message,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentAdmin } from '../identity.js';
+import { ses } from '../session.js';
 import { money } from '../words.js';
 
 async function admin(i: ButtonInteraction | ModalSubmitInteraction): Promise<{ id: string } | null> {
@@ -13,6 +14,10 @@ async function admin(i: ButtonInteraction | ModalSubmitInteraction): Promise<{ i
 }
 async function fail(i: ButtonInteraction | ModalSubmitInteraction | ChatInputCommandInteraction, e: unknown): Promise<void> {
   if (isUserError(e)) { await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` }); return; }
+  throw e;
+}
+async function fail2(msg: Message, e: unknown): Promise<void> {
+  if (isUserError(e)) { await msg.reply(`❌ ${userMessage(e)}`); return; }
   throw e;
 }
 const done = (i: ButtonInteraction, text: string) => i.update({ content: text, components: [] });
@@ -97,17 +102,35 @@ export async function loaderShortAmount(i: ModalSubmitInteraction, orderId: stri
   await i.reply({ ephemeral: false, content: `✅ Recorded ${money(cents)} · by ${i.user.username}` });
 }
 
-/** "I paid it" on a cash-out → ask for the reference. */
+/** "I paid it" on a cash-out → ask for a screenshot (posted in the channel). A
+ *  Discord modal can't take a file upload, so we collect the next message from
+ *  this admin instead (image → receipt for the player; text → reference). */
 export async function withdrawPay(i: ButtonInteraction, withdrawId: string): Promise<void> {
   if (!(await admin(i))) return;
-  await i.showModal(new ModalBuilder().setCustomId(`wd:payref:${withdrawId}`).setTitle('Payment reference')
-    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('ref').setLabel('Transaction ID / reference').setStyle(TextInputStyle.Short).setRequired(true))));
+  const s = ses(i.user.id);
+  s.pending = 'pay_receipt';
+  s.payWithdrawId = withdrawId;
+  await i.reply({ ephemeral: true, content: '📸 Post a **screenshot** of the payment you sent here — the player gets it as their receipt.\n\n_No screenshot? Just type the transaction ID instead._' });
 }
-export async function withdrawPayRef(i: ModalSubmitInteraction, withdrawId: string): Promise<void> {
-  const a = await admin(i); if (!a) return;
-  const ref = i.fields.getTextInputValue('ref').trim();
-  try { await mutate(async (sql) => await sql`select withdraw_club_payout(${withdrawId}::uuid, ${a.id}::uuid, null, ${ref}, 'paid via discord')`); } catch (e) { return void (await fail(i, e)); }
-  await i.reply({ ephemeral: false, content: `✅ Recorded as paid (ref \`${ref}\`). The player has been told.` });
+
+/** The admin's next message after "I paid it": an image (receipt, forwarded to
+ *  the player) or text (a plain reference). */
+export async function payReceipt(msg: Message): Promise<void> {
+  const s = ses(msg.author.id);
+  const withdrawId = s.payWithdrawId;
+  const a = await currentAdmin(msg.author.id);
+  const img = msg.attachments.find((at) => (at.contentType ?? '').startsWith('image/')) ?? msg.attachments.first();
+  const url = img?.url ?? null;
+  const text = msg.content.trim();
+  if (!url && !text) return void (await msg.reply('Post a screenshot of the payment, or type the transaction ID.'));
+  s.pending = undefined;
+  s.payWithdrawId = undefined;
+  if (!withdrawId || !a) return;
+  try {
+    await mutate(async (sql) => await sql`select withdraw_club_payout(${withdrawId}::uuid, ${a.id}::uuid, null,
+                                          ${url ? null : text}, 'paid via discord', ${url})`);
+  } catch (e) { return void (await fail2(msg, e)); }
+  await msg.reply(url ? '✅ Recorded as paid — the receipt was sent to the player.' : `✅ Recorded as paid (ref \`${text}\`). The player has been told.`);
 }
 
 /** Sportsbook account created. */

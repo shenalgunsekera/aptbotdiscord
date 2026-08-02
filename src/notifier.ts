@@ -130,8 +130,13 @@ export function render(n: Notification): Rendered | null {
       return { content: `Your cash-out was cancelled and everything's back where it was.` };
     case 'withdraw.cancel_confirmed':
       return { content: `✅ **Cancellation confirmed.** ${m(p.amount, p.currency)} has been put back on your table.` };
-    case 'withdraw.paid':
-      return { content: `💸 **You've been paid ${m(p.amount, p.currency)}!**` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') };
+    case 'withdraw.paid': {
+      const hasImg = p.receipt && String(p.receipt).startsWith('http');
+      return {
+        content: `💸 **You've been paid ${m(p.amount, p.currency)}!**` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : ''),
+        ...(hasImg ? { embeds: imgEmbeds([p.receipt]) } : {}),
+      };
+    }
     case 'withdraw.reduced_player':
       return { content: `➖ **${m(p.back, p.currency)}** is coming back to your table. Your cash-out is now **${m(p.new_total, p.currency)}**.` };
     case 'withdraw.adjusted_player':

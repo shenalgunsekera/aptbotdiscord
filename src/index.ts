@@ -32,6 +32,8 @@ client.on(Events.MessageCreate, (msg) => { void handleMessage(msg).catch((e) => 
 async function handleMessage(msg: Message): Promise<void> {
   if (msg.author.bot) return;
   const pending = ses(msg.author.id).pending;
+  // Admin uploading a payment-receipt screenshot (may be an image with no text).
+  if (pending === 'pay_receipt') return void (await admin.payReceipt(msg));
   const text = msg.content.trim();
   if (pending && text) return void (await routeText(msg, pending, text));
   await onReceiptMessage(msg);
@@ -143,7 +145,6 @@ async function onComponent(i: any): Promise<void> {
   if (id.startsWith('lo:short:')) return void (await admin.loaderShort(i, arg));
   if (id.startsWith('lo:shortamt:')) return void (await admin.loaderShortAmount(i, arg));
   if (id.startsWith('wd:pay:')) return void (await admin.withdrawPay(i, arg));
-  if (id.startsWith('wd:payref:')) return void (await admin.withdrawPayRef(i, arg));
   if (id.startsWith('sb:made:')) return void (await admin.sbMade(i, arg));
   if (id.startsWith('st:ok:')) return void (await admin.stripeOk(i, arg));
   if (id.startsWith('st:credit:')) return void (await admin.stripeCredit(i, arg));
