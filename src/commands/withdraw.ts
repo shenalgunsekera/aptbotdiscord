@@ -7,6 +7,7 @@ import { currentPlayer } from '../identity.js';
 import { ses } from '../session.js';
 import { money, whole, parseAmount, amountProblem, withdrawHandlePrompt, cashoutConfirm } from '../words.js';
 import { confirmedPlatforms, payoutMethods, methodOption, say, sayChat, sendChannel, selectRow } from '../flows.js';
+import { editDiscordCard } from '../notifier.js';
 import type { PaymentMethod, WithdrawRequest } from '../core/index.js';
 
 /** /withdraw — cash-out. platform → club → amount(chat) → method → handle(chat) → queue. */
@@ -122,29 +123,109 @@ async function finish(userId: string, send: (content: string) => Promise<void>, 
   await send(cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle) + '\n\nChanged your mind? Cancel it from `/pending` while it\'s still waiting.');
 }
 
-/** /cancelwithdraw — cancel a cash-out that hasn't been paid. One → cancel it;
- *  several → buttons to pick (reuses the wd:retract handler). */
+type WOut = { id: string; requested_amount: number; amount_remaining: number; currency: string; status: string };
+const cancellableOf = (w: WOut) => (w.status === 'pending_unload' ? w.requested_amount : w.amount_remaining);
+
+/** /cancelwithdraw — one → Full/Partial buttons; several → pick which first. */
 export async function cancelWithdraw(i: ChatInputCommandInteraction): Promise<void> {
   const p = await currentPlayer(i.user.id);
   if (!p) return void (await say(i, 'Send `/start` to set up first.'));
-  const outs = await db()<{ id: string; amount: number | null; requested_amount: number; currency: string; status: string }[]>`
-    select id, amount, requested_amount, currency, status from withdraw_requests
+  const outs = await db()<WOut[]>`
+    select id, requested_amount, amount_remaining, currency, status from withdraw_requests
      where player_id = ${p.id} and status in ('pending_unload','queued','partially_filled')
      order by created_at desc`;
-  if (!outs.length) return void (await say(i, "You don't have a cash-out to cancel. (Ones already paid can't be cancelled — use /support if you need help.)"));
-  if (outs.length === 1) {
-    const o = outs[0]!;
-    try { await mutate(async (sql) => await sql`select withdraw_cancel(${o.id}::uuid, null, 'cancelled by player')`); }
-    catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
-    return void (await i.reply({ ephemeral: false, content: '✅ Your cash-out was cancelled. Anything not yet paid is back on your table.' }));
-  }
+  const live = outs.filter((o) => cancellableOf(o) > 0);
+  if (!live.length) return void (await say(i, "You don't have a cash-out to cancel. (Anything already being paid can't be cancelled — use /support if you need help.)"));
+  if (live.length === 1) return void (await i.reply({ ephemeral: false, ...cancelOptions(live[0]!) }));
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    ...outs.slice(0, 5).map((o) => new ButtonBuilder()
-      .setCustomId(`wd:retract:${o.id}`)
-      .setLabel(`Cancel ${money(o.amount ?? o.requested_amount, o.currency)}`)
-      .setStyle(ButtonStyle.Danger)),
+    ...live.slice(0, 5).map((o) => new ButtonBuilder()
+      .setCustomId(`wc:pick:${o.id}`)
+      .setLabel(`${money(cancellableOf(o), o.currency)} — ${o.status === 'pending_unload' ? 'not started' : 'in queue'}`)
+      .setStyle(ButtonStyle.Secondary)),
   );
   await i.reply({ ephemeral: false, content: 'Which cash-out do you want to cancel?', components: [row] });
+}
+
+function cancelOptions(w: WOut): { content: string; components: ActionRowBuilder<ButtonBuilder>[] } {
+  const c = cancellableOf(w);
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`wc:full:${w.id}`).setLabel(`Cancel it all (${money(c, w.currency)})`).setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`wc:part:${w.id}`).setLabel('Cancel part of it').setStyle(ButtonStyle.Secondary),
+  );
+  return {
+    content: `Cancel this cash-out? **${money(c, w.currency)}** can be cancelled.` +
+      (w.status !== 'pending_unload' ? '\n_An admin will re-load whatever you cancel back onto your table._' : ''),
+    components: [row],
+  };
+}
+
+export async function cancelPick(i: ButtonInteraction, withdrawId: string): Promise<void> {
+  const p = await currentPlayer(i.user.id); if (!p) return;
+  const [w] = await db()<WOut[]>`select id, requested_amount, amount_remaining, currency, status from withdraw_requests where id = ${withdrawId} and player_id = ${p.id}`;
+  if (!w) return void (await i.update({ content: "Can't find that cash-out.", components: [] }));
+  await i.update(cancelOptions(w));
+}
+
+export async function cancelFull(i: ButtonInteraction, withdrawId: string): Promise<void> {
+  await i.deferUpdate();
+  await doCancel(i, withdrawId, Number.MAX_SAFE_INTEGER);
+}
+
+export async function cancelPart(i: ButtonInteraction, withdrawId: string): Promise<void> {
+  const s = ses(i.user.id); s.pending = 'cancel_amount'; s.cancelWithdrawId = withdrawId;
+  await i.update({ content: 'How much do you want to cancel? Type the number here, e.g. `20`.', components: [] });
+}
+
+export async function onCancelAmountText(msg: Message, text: string): Promise<void> {
+  const s = ses(msg.author.id); const withdrawId = s.cancelWithdrawId;
+  s.pending = undefined; s.cancelWithdrawId = undefined;
+  if (!withdrawId) return;
+  const amount = parseAmount(text);
+  if (amount === null || amount <= 0) return void (await msg.reply('Send just the number, e.g. `20`.'));
+  await doCancel(msg, withdrawId, amount);
+}
+
+/** Shared: run the DB cancel, edit the admin card in place, tell the player. */
+async function doCancel(ctx: ButtonInteraction | Message, withdrawId: string, amount: number): Promise<void> {
+  const client = ctx.client;
+  const reply = async (content: string) => {
+    if ('deferUpdate' in ctx) {   // a button interaction (deferred in cancelFull)
+      const bi = ctx as ButtonInteraction;
+      if (bi.deferred || bi.replied) await bi.editReply({ content, components: [] });
+      else await bi.update({ content, components: [] });
+    } else {
+      await (ctx as Message).reply(content);
+    }
+  };
+  type J = { scenario: string; order_id: string; full: boolean; cancelled: number; new_amount?: number };
+  let j: J;
+  try {
+    const rows = await mutate(async (sql) => await sql<{ j: J }[]>`select withdraw_player_cancel(${withdrawId}::uuid, ${amount}::bigint, null) as j`);
+    j = rows[0]!.j;
+  } catch (e) {
+    if (isUserError(e)) return void (await reply(`❌ ${userMessage(e)}`));
+    throw e;
+  }
+
+  if (j.scenario === 'pending_full') {
+    await editDiscordCard(client, 'loader_order', j.order_id, '↩️ **Cash-out cancelled by the player** — nothing to take off.');
+    return void (await reply('✅ Your cash-out was cancelled. Nothing was taken off your table.'));
+  }
+  if (j.scenario === 'pending_partial') {
+    const [o] = await db()<{ delta: number; currency: string; player_name: string; platform_uid: string }[]>`
+      select delta, currency, player_name, platform_uid from loader_orders where id = ${j.order_id}`;
+    if (o) {
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`lo:claim:${j.order_id}`).setLabel('✋ Claim').setStyle(ButtonStyle.Primary));
+      await editDiscordCard(client, 'loader_order', j.order_id,
+        `🎰 **TAKE OFF ${money(Math.abs(Number(o.delta)), o.currency)}** (reduced by the player)\n` +
+          `Player: **${o.player_name}**\nID: \`${o.platform_uid}\``, [row]);
+    }
+    return void (await reply(`✅ Reduced — we'll take off **${money(Number(j.new_amount ?? 0))}** instead. Your line stays.`));
+  }
+  await reply(
+    `✅ Cancellation requested. An admin will re-load **${money(Number(j.cancelled))}** back onto your table — ` +
+      `you'll get a confirmation here the moment it's back.` + (j.full ? '' : '\n_The rest stays in your queue._'));
 }
 
 /** ✖️ Cancel — retract a cash-out (from /pending). */

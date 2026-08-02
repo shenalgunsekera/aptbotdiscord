@@ -59,8 +59,9 @@ export class Notifier {
       try {
         const ch = await this.client.channels.fetch(channelId);
         if (!ch || !ch.isTextBased() || !('send' in ch)) throw new Error('not a sendable channel');
-        await (ch as TextBasedChannel & { send: Function }).send(rendered);
-        await sql`update notifications set status='sent', sent_at=now() where id=${n.id}`;
+        const sentMsg = await (ch as TextBasedChannel & { send: Function }).send(rendered);
+        await sql`update notifications set status='sent', sent_at=now(),
+                  sent_chat_id=${String(channelId)}, sent_message_id=${sentMsg?.id ?? null} where id=${n.id}`;
         sent++;
       } catch (err) {
         const desc = String((err as Error)?.message ?? err);
@@ -78,6 +79,27 @@ const btn = (label: string, id: string, style = ButtonStyle.Success) =>
   new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
 const row = (...b: ButtonBuilder[]) => [new ActionRowBuilder<ButtonBuilder>().addComponents(...b)];
 const imgEmbeds = (urls: string[]) => urls.filter(Boolean).slice(0, 4).map((u) => new EmbedBuilder().setImage(u));
+
+/** Edit an already-delivered admin card in place (so a cancellation updates the
+ *  Claim card instead of posting a new message). Uses the channel + message id the
+ *  notifier recorded when it delivered the card. Best-effort. */
+export async function editDiscordCard(
+  client: Client, refType: string, refId: string, content: string,
+  components: ActionRowBuilder<ButtonBuilder>[] = [],
+): Promise<boolean> {
+  const [n] = await db()<{ sent_chat_id: string | null; sent_message_id: string | null }[]>`
+    select sent_chat_id, sent_message_id from notifications
+     where ref_type = ${refType} and ref_id = ${refId}::uuid and platform = 'discord'
+       and status = 'sent' and sent_message_id is not null order by id desc limit 1`;
+  if (!n?.sent_chat_id || !n.sent_message_id) return false;
+  try {
+    const ch = await client.channels.fetch(n.sent_chat_id);
+    if (!ch || !ch.isTextBased() || !('messages' in ch)) return false;
+    const msg = await (ch as { messages: { fetch: (id: string) => Promise<{ edit: (o: unknown) => Promise<unknown> }> } }).messages.fetch(n.sent_message_id);
+    await msg.edit({ content, components });
+    return true;
+  } catch { return false; }
+}
 
 /** Notification → Discord message. Ported from the Telegram renderer; Telegram
  *  `*bold*` becomes Discord `**bold**`, buttons become components. */
@@ -107,6 +129,8 @@ export function render(n: Notification): Rendered | null {
       return { content: `🎉 **Cash-out complete!** ${m(p.amount, p.currency)} — all done.` };
     case 'withdraw.cancelled':
       return { content: `Your cash-out was cancelled and everything's back where it was.` };
+    case 'withdraw.cancel_confirmed':
+      return { content: `✅ **Cancellation confirmed.** ${m(p.amount, p.currency)} has been put back on your table.` };
     case 'withdraw.paid':
       return { content: `💸 **You've been paid ${m(p.amount, p.currency)}!**` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') };
     case 'withdraw.reduced_player':
@@ -139,9 +163,13 @@ export function render(n: Notification): Rendered | null {
       return { content: `📍 **${p.name}** (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
     case 'loader.work': {
       const load = Number(p.delta) > 0;
+      const reload = p.reason === 'withdraw.cancel_reload';
       return {
-        content: `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}**\n` +
-          `Player: **${p.player_name}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
+        content: reload
+          ? `↩️ **Player cancelled a cash-out — re-load ${m(Math.abs(Number(p.delta)), p.currency)}**\n` +
+            `Player: **${p.player_name}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
+          : `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}**\n` +
+            `Player: **${p.player_name}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
         components: row(btn('✋ Claim', `lo:claim:${n.ref_id}`, ButtonStyle.Primary)),
       };
     }

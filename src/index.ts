@@ -52,6 +52,7 @@ async function routeText(msg: Message, pending: string, text: string): Promise<v
     case 'wd_amount': return void (await withdraw.onAmountText(msg, text));
     case 'wd_handle': return void (await withdraw.onHandleText(msg, text));
     case 'wd_reduce': return void (await withdraw.onReduceText(msg, text));
+    case 'cancel_amount': return void (await withdraw.onCancelAmountText(msg, text));
     case 'edit_payout': return void (await edit.payoutHandleText(msg, text));
     case 'edit_acct': return void (await edit.acctText(msg, text));
   }
@@ -126,6 +127,9 @@ async function onComponent(i: any): Promise<void> {
   if (id === 'out:club') return void (await withdraw.onClub(i));
   if (id === 'out:m') return void (await withdraw.onMethod(i));
   if (id.startsWith('wd:retract:')) return void (await withdraw.retract(i, arg));
+  if (id.startsWith('wc:pick:')) return void (await withdraw.cancelPick(i, arg));
+  if (id.startsWith('wc:full:')) return void (await withdraw.cancelFull(i, arg));
+  if (id.startsWith('wc:part:')) return void (await withdraw.cancelPart(i, arg));
   if (id.startsWith('wd:reduce:')) return void (await withdraw.reducePrompt(i, arg));
 
   // ── admin ──
