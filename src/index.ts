@@ -142,6 +142,7 @@ async function onComponent(i: any): Promise<void> {
   if (id.startsWith('lo:claim:')) return void (await admin.loaderClaim(i, arg));
   if (id.startsWith('lo:done:')) return void (await admin.loaderDone(i, parts[2]!, Number(parts[3])));
   if (id.startsWith('lo:fail:')) return void (await admin.loaderFail(i, arg));
+  if (id.startsWith('lo:failreason:')) return void (await admin.loaderFailReason(i, arg));
   if (id.startsWith('lo:short:')) return void (await admin.loaderShort(i, arg));
   if (id.startsWith('lo:shortamt:')) return void (await admin.loaderShortAmount(i, arg));
   if (id.startsWith('wd:pay:')) return void (await admin.withdrawPay(i, arg));

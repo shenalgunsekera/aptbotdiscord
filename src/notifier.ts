@@ -121,8 +121,8 @@ export function render(n: Notification): Rendered | null {
     case 'withdraw.queued':
       return {
         content: p.short
-          ? `✅ We got **${m(p.amount, p.currency)}** off your table (of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
-          : `✅ **${m(p.amount, p.currency)}** is ready and you're in line to be paid.`,
+          ? `🎰 **${m(p.amount, p.currency)} in chips have been claimed** — that's what was on your table of the ${m(p.requested, p.currency)} you asked for.`
+          : `🎰 **${m(p.amount, p.currency)} in chips have been claimed.**`,
       };
     case 'withdraw.completed':
       return { content: `🎉 **Cash-out complete!** ${m(p.amount, p.currency)} — all done.` };
@@ -227,6 +227,12 @@ export function render(n: Notification): Rendered | null {
         : { content: (p.small ? `🔹 **Small cash-out — pay it directly.** Under the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n` : '') + `💸 **Cash-out to pay** (${p.method})\n${p.name ? 'To: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}**\nSend to: \`${p.handle}\` _(tap to copy)_\nPay it, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) };
     case 'loader.delivery_failed':
       return { content: `⚠️ **Couldn't add value** to ${p.player_name} (\`${p.platform_uid}\`) — ${m(p.delta, p.currency)}\n_${p.reason}_ — needs a human.` };
+    case 'loader.failed_player':
+      return {
+        content: Number(p.delta) > 0
+          ? `⚠️ **We couldn't put ${m(Math.abs(Number(p.delta)), p.currency)} back on your table.**\n_${p.reason}_\nYour money is safe in your balance — an admin is sorting it out.`
+          : `⚠️ **We couldn't complete your cash-out.**\n_${p.reason}_\nNothing was taken off your table. Please try again or message us.`,
+      };
     default:
       return null;
   }

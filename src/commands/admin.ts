@@ -84,10 +84,18 @@ export async function loaderDone(i: ButtonInteraction, orderId: string, delta: n
   await done(i, `✅ **Transaction completed by ${i.user.username}**${delta === 0 ? ' — nothing was available' : ' — ' + money(Math.abs(delta))}`);
 }
 
+/** "Failed" → ask WHY in a modal, so the player can be told the reason. */
 export async function loaderFail(i: ButtonInteraction, orderId: string): Promise<void> {
+  if (!(await admin(i))) return;
+  await i.showModal(new ModalBuilder().setCustomId(`lo:failreason:${orderId}`).setTitle('Why did it fail?')
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('reason').setLabel('Reason (the player is told this)').setStyle(TextInputStyle.Paragraph).setRequired(true))));
+}
+export async function loaderFailReason(i: ModalSubmitInteraction, orderId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
-  try { await mutate(async (sql) => await sql`select loader_order_fail(${orderId}::uuid, ${a.id}::uuid, 'marked failed via discord')`); } catch (e) { return void (await fail(i, e)); }
-  await done(i, `❌ **Failed** · by ${i.user.username}`);
+  const reason = i.fields.getTextInputValue('reason').trim();
+  try { await mutate(async (sql) => await sql`select loader_order_fail(${orderId}::uuid, ${a.id}::uuid, ${reason})`); } catch (e) { return void (await fail(i, e)); }
+  await i.reply({ ephemeral: false, content: `❌ **Failed** · by ${i.user.username} — the player was told the reason.` });
 }
 
 export async function loaderShort(i: ButtonInteraction, orderId: string): Promise<void> {
