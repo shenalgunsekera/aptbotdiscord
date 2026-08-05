@@ -24,10 +24,7 @@ export async function sendChannel(msg: Message, content: string, components: any
   if (ch && typeof ch.send === 'function') await ch.send({ content, components });
 }
 
-// Venmo/Zelle are company-settled (0062) but fiat P2P, not coins — exclude by name.
-const FIAT_CLUB = new Set(['venmo', 'zelle']);
-export const isCrypto = (m: PaymentMethod) =>
-  m.reversibility === 'irreversible' && m.settlement === 'club' && !FIAT_CLUB.has(m.code);
+export const isCrypto = (m: PaymentMethod) => m.reversibility === 'irreversible' && m.settlement === 'club';
 
 /** Full coin names for the crypto rails — shown as the option description so the
  *  list reads e.g. "BTC" with "Bitcoin" underneath. */
@@ -60,21 +57,21 @@ export async function depositMethods(playerId: string): Promise<PaymentMethod[]>
      where m.enabled and (
        exists (select 1 from player_method_prefs pmp where pmp.player_id = ${playerId} and pmp.method_id = m.id)
        or not exists (select 1 from player_method_prefs pmp where pmp.player_id = ${playerId}))
-     order by (m.reversibility = 'irreversible' and m.settlement = 'club' and m.code not in ('venmo','zelle')), m.sort_order, m.name`;
+     order by (m.reversibility = 'irreversible' and m.settlement = 'club'), m.sort_order, m.name`;
 }
 
 /** Payout-enabled methods, fiat first and crypto at the bottom. */
 export async function payoutMethods(): Promise<PaymentMethod[]> {
   return db()<PaymentMethod[]>`
     select m.* from payment_methods m where m.enabled and m.payout_enabled
-     order by (m.reversibility = 'irreversible' and m.settlement = 'club' and m.code not in ('venmo','zelle')), m.sort_order, m.name`;
+     order by (m.reversibility = 'irreversible' and m.settlement = 'club'), m.sort_order, m.name`;
 }
 
 /** All enabled methods, fiat first and crypto at the bottom. */
 export async function allMethods(): Promise<PaymentMethod[]> {
   return db()<PaymentMethod[]>`
     select m.* from payment_methods m where m.enabled
-     order by (m.reversibility = 'irreversible' and m.settlement = 'club' and m.code not in ('venmo','zelle')), m.sort_order, m.name`;
+     order by (m.reversibility = 'irreversible' and m.settlement = 'club'), m.sort_order, m.name`;
 }
 
 export function selectRow(customId: string, placeholder: string, options: { label: string; value: string; description?: string }[], opts: { min?: number; max?: number } = {}) {
