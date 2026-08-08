@@ -169,8 +169,28 @@ function startHealthServer(): void {
   createServer((_req, res) => { res.writeHead(200); res.end('ok'); }).listen(port, () => console.log(`[health] listening on ${port}`));
 }
 
+// This always-on process drives the panel's cron every minute so crypto/email
+// detection + sweeps run near-instantly, independent of GitHub Actions (which can
+// be down). Idempotent on the panel side; unset CRON_SECRET = no-op.
+function startCronDriver(): void {
+  if (!CONFIG.cronSecret) {
+    console.warn('[cron-driver] CRON_SECRET not set — crypto/email polling will only run on the daily Vercel cron');
+    return;
+  }
+  const tick = async (): Promise<void> => {
+    try {
+      const r = await fetch(CONFIG.cronUrl, { headers: { Authorization: `Bearer ${CONFIG.cronSecret}` } });
+      if (!r.ok) console.error('[cron-driver] cron returned', r.status);
+    } catch (e) { console.error('[cron-driver] ping failed:', e); }
+  };
+  setInterval(() => { void tick(); }, 60_000);
+  void tick();   // once on boot
+  console.log('[cron-driver] driving', CONFIG.cronUrl, 'every 60s');
+}
+
 async function main(): Promise<void> {
   startHealthServer();
+  startCronDriver();
   await registerCommands();
   await client.login(CONFIG.token);
 }
