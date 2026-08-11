@@ -7,7 +7,7 @@ import { db, mutate, isUserError, userMessage } from '../db.js';
 import { registerPlayer, currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
 import { selectRow, allMethods, payoutMethods, methodOption, sendChannel } from '../flows.js';
-import { withdrawHandlePrompt, COMMANDS_LIST, SETUP_COMPLETE } from '../words.js';
+import { withdrawHandlePrompt, COMMANDS_LIST, SETUP_COMPLETE, DEV_NOTICE } from '../words.js';
 import type { Platform } from '../core/index.js';
 
 /** Everything is collected in CHAT — no popup forms. Selects (dropdowns) stay,
@@ -197,7 +197,8 @@ async function askNextPayout(msg: Message): Promise<void> {
   const next = s.wdQueue.shift();
   if (!next) {
     clearSes(msg.author.id);
-    await msg.reply(SETUP_COMPLETE);
+    const [cfg] = await db()<{ dev_notice_enabled: boolean }[]>`select dev_notice_enabled from config where id`;
+    await msg.reply(SETUP_COMPLETE + (cfg?.dev_notice_enabled ? `\n\n${DEV_NOTICE}` : ''));
     return;
   }
   s.outMethod = next;

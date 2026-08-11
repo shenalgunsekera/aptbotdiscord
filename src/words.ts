@@ -19,6 +19,11 @@ export const SETUP_COMPLETE =
   'We look forward to having you as part of the community!\n\n' +
   "When you're ready:\n" + COMMANDS_LIST;
 
+/** Pre-launch notice, appended after setup while config.dev_notice_enabled is on. */
+export const DEV_NOTICE =
+  '⚠️ **Please do not use the bot for deposits and cash-outs yet.** ' +
+  "The bot is still in development and we'll let you know once you can officially begin using it.";
+
 /**
  * Plain-language + money helpers, ported from the Telegram bot's words.ts so both
  * front-ends read identically to players.
