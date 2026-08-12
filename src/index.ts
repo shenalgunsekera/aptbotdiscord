@@ -191,7 +191,14 @@ function startCronDriver(): void {
 async function main(): Promise<void> {
   startHealthServer();
   startCronDriver();
-  await registerCommands();
+  // A bad DISCORD_GUILD_ID (wrong id, or the bot isn't in that server yet) makes
+  // command registration throw. That must NOT keep the whole bot offline — log it
+  // and connect anyway; commands re-register on the next boot once it's fixed.
+  try {
+    await registerCommands();
+  } catch (e) {
+    console.error('[discord] command registration failed — logging in anyway:', e);
+  }
   await client.login(CONFIG.token);
 }
 void main();
