@@ -177,11 +177,17 @@ function startCronDriver(): void {
     console.warn('[cron-driver] CRON_SECRET not set — crypto/email polling will only run on the daily Vercel cron');
     return;
   }
+  let running = false;
   const tick = async (): Promise<void> => {
+    if (running) return;   // never overlap — a slow cron run must not stack up
+    running = true;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 90_000);
     try {
-      const r = await fetch(CONFIG.cronUrl, { headers: { Authorization: `Bearer ${CONFIG.cronSecret}` } });
+      const r = await fetch(CONFIG.cronUrl, { headers: { Authorization: `Bearer ${CONFIG.cronSecret}` }, signal: ac.signal });
       if (!r.ok) console.error('[cron-driver] cron returned', r.status);
-    } catch (e) { console.error('[cron-driver] ping failed:', e); }
+    } catch (e) { console.error('[cron-driver] ping failed:', (e as Error).message); }
+    finally { clearTimeout(timer); running = false; }
   };
   setInterval(() => { void tick(); }, 60_000);
   void tick();   // once on boot
@@ -191,14 +197,22 @@ function startCronDriver(): void {
 async function main(): Promise<void> {
   startHealthServer();
   startCronDriver();
-  // A bad DISCORD_GUILD_ID (wrong id, or the bot isn't in that server yet) makes
-  // command registration throw. That must NOT keep the whole bot offline — log it
-  // and connect anyway; commands re-register on the next boot once it's fixed.
+  // Connect to Discord FIRST so the bot comes ONLINE immediately. Registering
+  // slash commands afterwards means a slow/hanging call or a bad DISCORD_GUILD_ID
+  // can never block the login (which was leaving the bot offline).
+  try {
+    await client.login(CONFIG.token);
+  } catch (e) {
+    console.error(
+      '[discord] LOGIN FAILED — the bot will be OFFLINE. Check that DISCORD_TOKEN is correct, ' +
+      'and that Privileged Gateway Intents (especially MESSAGE CONTENT) are turned ON in the ' +
+      'Discord Developer Portal → your app → Bot:', e);
+    return;
+  }
   try {
     await registerCommands();
   } catch (e) {
-    console.error('[discord] command registration failed — logging in anyway:', e);
+    console.error('[discord] command registration failed (bot is online; some commands may be missing):', e);
   }
-  await client.login(CONFIG.token);
 }
 void main();
