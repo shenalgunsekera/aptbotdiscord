@@ -206,7 +206,7 @@ export function render(n: Notification): Rendered | null {
       if (p.kind === 'cancel')
         return { content: `🚫 **${who}** canceled their ${amt} ${src} request` };
       const approx = p.approx ? '≈ ' : '';
-      return { content: `💸 **Payment of ${approx}${amt} received from ${who} via ${src}**` + (p.ref ? `\nRef: \`${p.ref}\`` : '') };
+      return { content: `💸 **Payment of ${approx}${amt} sent by ${who} via ${src}**` };
     }
     case 'stripe.claim':
       return {
