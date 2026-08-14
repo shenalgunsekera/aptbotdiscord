@@ -196,12 +196,19 @@ export function render(n: Notification): Rendered | null {
       };
     }
     case 'payment.detected': {
-      const icon = p.source === 'paypal' ? '💚' : p.source === 'cashapp' ? '💵' : p.source === 'stripe' ? '💳' : '🪙';
+      const src = p.source === 'paypal' ? 'PayPal'
+        : p.source === 'cashapp' ? 'Cash App'
+        : (p.method || (p.source === 'stripe' ? 'Card' : 'crypto'));
+      const who = p.name || 'someone';
+      const amt = m(p.amount, p.currency);
       if (p.kind === 'request' || p.request)
-        return { content: `${icon}🧾 **Payment request** — ${m(p.amount, p.currency)} via ${p.method}` + (p.name ? `\nFrom: **${p.name}**` : '') + `\n_Pay it if it matches a cash-out._` };
+        return { content: `📨 **${who}** requested ${amt} via ${src}\n_Someone's requesting money — pay it only if it matches a cash-out._` };
       if (p.kind === 'cancel')
-        return { content: `${icon}🚫 **Request cancelled** — ${m(p.amount, p.currency)} via ${p.method}` + (p.name ? `\nFrom: **${p.name}**` : '') + `\n_No action needed._` };
-      return { content: `${icon} **Payment received** — ${m(p.amount, p.currency)} via ${p.method}` + (p.name ? `\nFrom: **${p.name}**` : '') + `\n_Match it to the player's receipt, then credit them._` };
+        return { content: `🚫 **${who}** canceled their ${amt} ${src} request\n_No action needed._` };
+      const approx = p.approx ? '≈ ' : '';
+      return p.matched
+        ? { content: `💸 **Payment of ${approx}${amt} received from ${who} via ${src}**` + (p.ref ? `\nRef: \`${p.ref}\`` : '') + (p.approx ? `\n_(matched by live price — confirm the exact amount)_` : '') + `\n_Auto-matched — check the receipt, then Verify & release._` }
+        : { content: `💸 **Payment of ${amt} received from ${who} via ${src}**\n_Match it to the player's receipt, then credit them._` };
     }
     case 'stripe.claim':
       return {
