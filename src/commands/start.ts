@@ -10,6 +10,19 @@ import { selectRow, allMethods, payoutMethods, methodOption, sendChannel } from 
 import { withdrawHandlePrompt, COMMANDS_LIST, SETUP_COMPLETE, DEV_NOTICE } from '../words.js';
 import type { Platform } from '../core/index.js';
 
+/** A ClubGG player ID is 8 digits. Players keep entering the 6-digit CLUB code
+ *  instead. Returns the normalized `1234-5678` form, or null if it isn't 8 digits. */
+export function validClubggId(text: string): string | null {
+  const d = text.replace(/\D/g, '');
+  return d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4)}` : null;
+}
+export function clubggIdError(text: string): string {
+  const d = text.replace(/\D/g, '');
+  return d.length === 6
+    ? `That's the **club code** (6 digits). We need your **ClubGG player ID** — the **8-digit** number on your ClubGG profile, e.g. \`1234-5678\`. Send that one.`
+    : `A ClubGG ID is **8 digits** (e.g. \`1234-5678\`). Please check and send it again.`;
+}
+
 /** Everything is collected in CHAT — no popup forms. Selects (dropdowns) stay,
  *  since they're inline, not forms. A `Sender` posts a prompt whether we're
  *  coming from an interaction or a typed message. */
@@ -83,7 +96,7 @@ async function askNextAccount(send: Sender, userId: string): Promise<void> {
   if (pf?.code === 'sportsbook' && s.sbCreate) { s.pending = 'sb_user'; await send('What would you like your **username** to be? (Max 10 characters)'); return; }
   s.pending = 'acct';
   const label = pf?.code === 'clubgg' ? 'ClubGG ID' : pf?.code === 'sportsbook' ? 'APT Sports username' : `${pf?.name} account ID`;
-  const eg = pf?.code === 'clubgg' ? '\n(e.g. 1234-5678)' : '';
+  const eg = pf?.code === 'clubgg' ? '\n_The 8-digit player ID (e.g. 1234-5678) — NOT the 6-digit club code._' : '';
   await send(`What's your **${label}**?${eg}`);
 }
 
@@ -92,8 +105,10 @@ export async function acctText(msg: Message, text: string): Promise<void> {
   if (!p) return; const pid = (s.acctQueue ?? [])[0]; if (!pid) return;
   const [pf] = await db()<{ code: string }[]>`select code from platforms where id = ${pid}`;
   if (pf?.code === 'clubgg') {
+    const uid = validClubggId(text);
+    if (!uid) return void (await msg.reply(clubggIdError(text)));   // stays on 'acct', so their next message retries
     // ClubGG: we have the ID, now ask the username; claim with both next.
-    s.pending = 'clubgg_user'; s.clubggUid = text.trim();
+    s.pending = 'clubgg_user'; s.clubggUid = uid;
     await msg.reply("What's your **ClubGG username**?");
     return;
   }

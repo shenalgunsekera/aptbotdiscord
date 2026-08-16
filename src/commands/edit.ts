@@ -7,6 +7,7 @@ import { currentPlayer } from '../identity.js';
 import { ses } from '../session.js';
 import { say, sayChat, sendChannel, allMethods, payoutMethods, methodOption } from '../flows.js';
 import { withdrawHandlePrompt } from '../words.js';
+import { validClubggId, clubggIdError } from './start.js';
 import type { Player } from '../core/index.js';
 
 type Opt = { label: string; value: string; description?: string; default?: boolean };
@@ -181,7 +182,7 @@ async function askNextEditAccount(send: (content: string) => Promise<void>, user
   if (!queue.length) { s.pending = undefined; await send('✅ Added — an admin will confirm shortly. ' + doneMsg(s.editBlocked ?? [])); return; }
   const [pf] = await db()<{ code: string; name: string }[]>`select code, name from platforms where id = ${queue[0]!}`;
   const label = pf?.code === 'clubgg' ? 'ClubGG ID' : pf?.code === 'sportsbook' ? 'Sportsbook username' : `${pf?.name} account ID`;
-  const eg = pf?.code === 'clubgg' ? '\n(e.g. 1234-5678)' : '';
+  const eg = pf?.code === 'clubgg' ? '\n_The 8-digit player ID (e.g. 1234-5678) — NOT the 6-digit club code._' : '';
   await send(`What's your **${label}**?${eg}`);
 }
 
@@ -190,7 +191,9 @@ export async function acctText(msg: Message, text: string): Promise<void> {
   if (!p) return; const pid = (s.editAddPlatforms ?? [])[0]; if (!pid) return;
   const [pf] = await db()<{ code: string }[]>`select code from platforms where id = ${pid}`;
   if (pf?.code === 'clubgg') {
-    s.pending = 'edit_clubgg_user'; s.clubggUid = text.trim();
+    const uid = validClubggId(text);
+    if (!uid) return void (await msg.reply(clubggIdError(text)));   // stays on 'acct', so their next message retries
+    s.pending = 'edit_clubgg_user'; s.clubggUid = uid;
     await msg.reply("What's your **ClubGG username**?");
     return;
   }
