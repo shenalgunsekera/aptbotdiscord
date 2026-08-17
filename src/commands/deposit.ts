@@ -7,6 +7,7 @@ import { currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
 import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
 import { confirmedPlatforms, depositMethods, methodOption, say, sayChat, sendChannel, selectRow } from '../flows.js';
+import { peerpayCheckout } from '../peerpay.js';
 import type { PaymentMethod, Fill, Player } from '../core/index.js';
 
 const STRIPE_LINK = () => process.env.STRIPE_PAYMENT_LINK ?? 'https://buy.stripe.com/5kQbJ2gdf2BE9TtbGDc3m07';
@@ -109,6 +110,13 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
     return void (await msg.reply('Something went wrong. Nothing was charged. Try again in a moment.'));
   }
   const [m] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
+
+  // PeerPay tier: the club fill's handle is the sentinel 'PEERPAY'. Mint a checkout
+  // link for this amount. p2p never splits, so a PeerPay deposit is a single fill.
+  if (fills.length === 1 && fills[0]!.payout_handle === 'PEERPAY') {
+    return void (await sendPeerpayInstruction(msg, fills[0]!, m!));
+  }
+
   const lines: string[] = [`**💸 Send your ${m!.name} payment now — you have 5 minutes**\n`];
   if (fills.length > 1) lines.push(`Your ${money(amount)} is split across **${fills.length} people**. Pay **each** separately:\n`);
   for (const [idx, f] of fills.entries()) {
@@ -124,6 +132,71 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
   lines.push('_Changed your mind? `/canceldeposit` before you pay._');
   ses(msg.author.id).addFillId = fills[0]!.id;
   await sendChannel(msg, lines.join('\n'));
+}
+
+/** PeerPay deposit: mint a checkout link + show Pay button and a "rail not
+ *  available → backup tag" button. The screenshot flow is identical to normal. */
+async function sendPeerpayInstruction(msg: Message, f: Fill, m: PaymentMethod): Promise<void> {
+  const url = await peerpayCheckout({ amountCents: f.amount, fillId: f.id, rail: m.code });
+  ses(msg.author.id).addFillId = f.id;
+
+  if (!url) {
+    if (await switchToBackupMsg(msg, f)) return;
+    return void (await sendChannel(msg, "We couldn't set up the payment link right now. Please /support and we'll sort it out — nothing was charged."));
+  }
+  const rowc = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(url),
+    new ButtonBuilder().setCustomId(`pp:backup:${f.id}`).setLabel(`⚠️ ${m.name} not available?`).setStyle(ButtonStyle.Secondary),
+  );
+  await sendChannel(msg,
+    `**💸 Pay ${money(f.amount, f.currency)} — you have a few minutes**\n\n` +
+      `1. Tap **Pay now**.\n` +
+      `2. Choose **${m.name}** on the page and send the payment.\n` +
+      `3. Come back and **upload a screenshot** of the confirmation here so we can add your money.\n\n` +
+      `_${m.name} not showing on the page? Tap the button below for another tag._\n` +
+      `_Changed your mind? \`/canceldeposit\` before you pay._`,
+    [rowc]);
+}
+
+/** Repoint a still-unpaid PeerPay fill to its direct backup tag. Returns the tag +
+ *  method name, or null when no backup is configured. */
+async function applyBackup(f: Fill): Promise<{ backup: string; methodName: string } | null> {
+  const [b] = await db()<{ backup: string | null }[]>`
+    select club_backup_for(${f.method_id}::uuid, ${f.amount}::bigint) as backup`;
+  const backup = b?.backup?.trim();
+  if (!backup) return null;
+  const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${f.method_id}`;
+  await mutate(async (sql) => await sql`update fills set payout_handle = ${backup} where id = ${f.id} and status = 'locked'`);
+  return { backup, methodName: m?.name ?? 'the app' };
+}
+
+async function switchToBackupMsg(msg: Message, f: Fill): Promise<boolean> {
+  const r = await applyBackup(f);
+  if (!r) return false;
+  ses(msg.author.id).addFillId = f.id;
+  await sendChannel(msg,
+    `No problem — pay **${money(f.amount, f.currency)}** to \`${r.backup}\` on **${r.methodName}** instead, ` +
+      `then upload a screenshot of the confirmation here.`);
+  return true;
+}
+
+/** "Payment method not available?" button on a PeerPay deposit → reveal backup. */
+export async function peerpayBackup(i: ButtonInteraction, fillId: string): Promise<void> {
+  const [f] = await db()<Fill[]>`select * from fills where id = ${fillId}`;
+  if (!f || f.status !== 'locked') {
+    return void (await i.reply({ ephemeral: true, content: 'That deposit is no longer waiting — `/deposit` again.' }));
+  }
+  const r = await applyBackup(f);
+  try { await i.update({ components: [] }); } catch { /* buttons already gone */ }
+  if (!r) {
+    return void (await i.followUp({ ephemeral: false, content: "There's no backup tag set for this one. Please /support and we'll help you pay." }));
+  }
+  ses(i.user.id).addFillId = f.id;
+  await i.followUp({
+    ephemeral: false,
+    content: `No problem — pay **${money(f.amount, f.currency)}** to \`${r.backup}\` on **${r.methodName}** instead, ` +
+      `then upload a screenshot of the confirmation here.`,
+  });
 }
 
 async function stripeDeposit(i: ChatInputCommandInteraction | StringSelectMenuInteraction | ButtonInteraction, platformId: string): Promise<void> {

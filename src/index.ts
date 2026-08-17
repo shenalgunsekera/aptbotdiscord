@@ -124,6 +124,7 @@ async function onComponent(i: any): Promise<void> {
   if (id === 'add:pf') return void (await deposit.onPlatform(i));
   if (id === 'add:club') return void (await deposit.onClub(i));
   if (id === 'add:m') return void (await deposit.onMethod(i));
+  if (id.startsWith('pp:backup:')) return void (await deposit.peerpayBackup(i, arg));
 
   // ── withdraw ──
   if (id === 'out:pf') return void (await withdraw.onPlatform(i));
