@@ -31,6 +31,9 @@ client.on(Events.MessageCreate, (msg) => { void handleMessage(msg).catch((e) => 
 
 async function handleMessage(msg: Message): Promise<void> {
   if (msg.author.bot) return;
+  // Staff replying in the admin channel to a "payment handle needed" request.
+  // Self-gating: only a tracked request message matches, so it's a no-op elsewhere.
+  if (msg.reference?.messageId && (await deposit.handleStaffReply(msg))) return;
   const pending = ses(msg.author.id).pending;
   // Admin uploading a payment-receipt screenshot (may be an image with no text).
   if (pending === 'pay_receipt') return void (await admin.payReceipt(msg));

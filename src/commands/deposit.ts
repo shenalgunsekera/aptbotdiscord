@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  type ChatInputCommandInteraction, type StringSelectMenuInteraction, type ButtonInteraction, type Message,
+  type ChatInputCommandInteraction, type StringSelectMenuInteraction, type ButtonInteraction, type Message, type Client,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
@@ -88,10 +88,12 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
   const problem = amountProblem(amount, { min: cfg.min_amount, max: cfg.max_amount, step: cfg.amount_step });
   if (problem) return void (await msg.reply(problem));
 
-  const [mm] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${s.addMethod}`;
-  if (mm?.code === 'cashapp' && amount < 25000) {
+  // A Stripe tier (e.g. Cash App up to $250) diverts to the fixed card/Apple Pay
+  // link before creating a deposit — configured in the panel, no longer hardcoded.
+  const [tier] = await db()<{ handle: string | null }[]>`
+    select club_handle_for(${s.addMethod}::uuid, ${amount}::bigint) as handle`;
+  if (tier?.handle === 'STRIPE') {
     s.pending = undefined;
-    await msg.reply('💵 For Cash App **under $250**, pay through our secure link and choose **Cash App Pay** on the page.');
     return void (await stripeDepositChannel(msg, s.addPlatform));
   }
   s.pending = undefined;
@@ -115,6 +117,10 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
   // link for this amount. p2p never splits, so a PeerPay deposit is a single fill.
   if (fills.length === 1 && fills[0]!.payout_handle === 'PEERPAY') {
     return void (await sendPeerpayInstruction(msg, fills[0]!, m!));
+  }
+  // Staff Provide tier: a human sends the handle. Ask staff in the admin channel.
+  if (fills.length === 1 && fills[0]!.payout_handle === 'STAFF') {
+    return void (await sendStaffProvideInstruction((c) => sendChannel(msg, c), msg.channelId, msg.client, fills[0]!, m!.name));
   }
 
   const lines: string[] = [`**💸 Send your ${m!.name} payment now — you have 5 minutes**\n`];
@@ -158,24 +164,27 @@ async function sendPeerpayInstruction(msg: Message, f: Fill, m: PaymentMethod): 
     [rowc]);
 }
 
-/** Repoint a still-unpaid PeerPay fill to its direct backup tag. Returns the tag +
- *  method name, or null when no backup is configured. */
-async function applyBackup(f: Fill): Promise<{ backup: string; methodName: string } | null> {
+/** Look up a PeerPay fill's backup: a direct tag/link, or the sentinel 'STAFF'. */
+async function backupValue(f: Fill): Promise<{ raw: string; methodName: string } | null> {
   const [b] = await db()<{ backup: string | null }[]>`
     select club_backup_for(${f.method_id}::uuid, ${f.amount}::bigint) as backup`;
   const backup = b?.backup?.trim();
   if (!backup) return null;
   const [m] = await db()<{ name: string }[]>`select name from payment_methods where id = ${f.method_id}`;
-  await mutate(async (sql) => await sql`update fills set payout_handle = ${backup} where id = ${f.id} and status = 'locked'`);
-  return { backup, methodName: m?.name ?? 'the app' };
+  return { raw: backup, methodName: m?.name ?? 'the app' };
 }
 
 async function switchToBackupMsg(msg: Message, f: Fill): Promise<boolean> {
-  const r = await applyBackup(f);
-  if (!r) return false;
+  const bv = await backupValue(f);
+  if (!bv) return false;
+  if (bv.raw === 'STAFF') {
+    await sendStaffProvideInstruction((c) => sendChannel(msg, c), msg.channelId, msg.client, f, bv.methodName);
+    return true;
+  }
+  await mutate(async (sql) => await sql`update fills set payout_handle = ${bv.raw} where id = ${f.id} and status = 'locked'`);
   ses(msg.author.id).addFillId = f.id;
   await sendChannel(msg,
-    `No problem — pay **${money(f.amount, f.currency)}** to \`${r.backup}\` on **${r.methodName}** instead, ` +
+    `No problem — pay **${money(f.amount, f.currency)}** to \`${bv.raw}\` on **${bv.methodName}** instead, ` +
       `then upload a screenshot of the confirmation here.`);
   return true;
 }
@@ -186,17 +195,97 @@ export async function peerpayBackup(i: ButtonInteraction, fillId: string): Promi
   if (!f || f.status !== 'locked') {
     return void (await i.reply({ ephemeral: true, content: 'That deposit is no longer waiting — `/deposit` again.' }));
   }
-  const r = await applyBackup(f);
+  const bv = await backupValue(f);
   try { await i.update({ components: [] }); } catch { /* buttons already gone */ }
-  if (!r) {
+  if (!bv) {
     return void (await i.followUp({ ephemeral: false, content: "There's no backup tag set for this one. Please /support and we'll help you pay." }));
   }
+  if (bv.raw === 'STAFF') {
+    await sendStaffProvideInstruction((c) => i.followUp({ ephemeral: false, content: c }).then(() => {}), i.channelId!, i.client, f, bv.methodName);
+    return;
+  }
+  await mutate(async (sql) => await sql`update fills set payout_handle = ${bv.raw} where id = ${f.id} and status = 'locked'`);
   ses(i.user.id).addFillId = f.id;
   await i.followUp({
     ephemeral: false,
-    content: `No problem — pay **${money(f.amount, f.currency)}** to \`${r.backup}\` on **${r.methodName}** instead, ` +
+    content: `No problem — pay **${money(f.amount, f.currency)}** to \`${bv.raw}\` on **${bv.methodName}** instead, ` +
       `then upload a screenshot of the confirmation here.`,
   });
+}
+
+/** Staff Provide: tell the player to hold on, post a request in the admin channel,
+ *  and record it so a staff member's REPLY there routes the handle back. `send`
+ *  posts to the player; `channelId`/`client` locate the channels. */
+async function sendStaffProvideInstruction(
+  send: (c: string) => Promise<unknown>, channelId: string, client: Client, f: Fill, methodName: string,
+): Promise<void> {
+  await send(`⏳ **Hold on a moment** — a staff member is getting you a payment handle for **${money(f.amount, f.currency)}**. You'll get it right here shortly.`);
+  const [cfg] = await db()<{ discord_admin_channel_id: string | null }[]>`select discord_admin_channel_id from config where id`;
+  const adminChan = cfg?.discord_admin_channel_id;
+  const ach = adminChan ? await client.channels.fetch(adminChan).catch(() => null) : null;
+  if (!adminChan || !ach || !ach.isTextBased() || !('send' in ach)) {
+    await send("We couldn't reach a staff member right now. Please /support and we'll help you pay.");
+    return;
+  }
+  const [pl] = await db()<{ name: string | null }[]>`
+    select dp.display_name as name from deposit_requests d join players dp on dp.id = d.player_id where d.id = ${f.deposit_id}`;
+  const playerName = pl?.name ?? 'A player';
+  const sent = await ach.send(
+    `🙋 **Payment handle needed**\n**${playerName}** wants to deposit **${money(f.amount, f.currency)}** via **${methodName}**.\n` +
+      `↩️ **Reply to this message** with the tag or link to send them.`);
+  await mutate(async (sql) => await sql`
+    insert into staff_handle_req (fill_id, platform, admin_chat_id, admin_message_id, player_chat_id, amount, currency, method_name, player_name)
+    values (${f.id}::uuid, 'discord', ${adminChan}, ${sent.id}, ${channelId}, ${f.amount}::bigint, ${f.currency}, ${methodName}, ${playerName})
+    on conflict (platform, admin_chat_id, admin_message_id) do nothing`);
+}
+
+/** A staff member replied in the admin channel to a "handle needed" request.
+ *  Repoint the fill, relay the tag/link to the player's channel, and mark them
+ *  awaiting a receipt. Returns true if this message was a staff reply we handled. */
+export async function handleStaffReply(msg: Message): Promise<boolean> {
+  const refId = msg.reference?.messageId;
+  if (!refId) return false;
+  const [req] = await db()<{
+    id: string; fill_id: string; player_chat_id: string; amount: string; currency: string; method_name: string | null;
+  }[]>`
+    select id, fill_id, player_chat_id, amount, currency, method_name
+      from staff_handle_req
+     where platform = 'discord' and admin_chat_id = ${msg.channelId}
+       and admin_message_id = ${refId} and status = 'pending'`;
+  if (!req) return false;
+
+  const handle = msg.content.trim();
+  if (!handle) { await msg.reply('Reply with the tag or link (text) to send the player.'); return true; }
+
+  const [f] = await db()<{ status: string }[]>`select status from fills where id = ${req.fill_id}`;
+  if (!f || f.status !== 'locked') {
+    await mutate(async (sql) => await sql`update staff_handle_req set status = 'cancelled' where id = ${req.id}`);
+    await msg.reply('That deposit is no longer waiting (cancelled or already handled).');
+    return true;
+  }
+  await mutate(async (sql) => {
+    await sql`update fills set payout_handle = ${handle} where id = ${req.fill_id} and status = 'locked'`;
+    await sql`update staff_handle_req set status = 'provided', provided_handle = ${handle} where id = ${req.id}`;
+  });
+
+  // Find the player (to mark them awaiting a receipt) and relay to their channel.
+  const [pl] = await db()<{ discord_id: string }[]>`
+    select dp.discord_id from fills f
+      join deposit_requests d on d.id = f.deposit_id
+      join discord_players dp on dp.player_id = d.player_id
+     where f.id = ${req.fill_id}`;
+  if (pl) ses(pl.discord_id).addFillId = req.fill_id;
+
+  const amt = money(Number(req.amount), req.currency);
+  const isLink = /^https?:\/\//i.test(handle);
+  const content = isLink
+    ? `✅ **Here's your payment link for ${amt}**\n${handle}\nPay it, then upload a screenshot of the confirmation here.`
+    : `✅ **Pay ${amt} to:**\n\`${handle}\`\nvia **${req.method_name ?? 'the app'}**. Upload a screenshot of the confirmation here once you've paid.`;
+  const ch = await msg.client.channels.fetch(req.player_chat_id).catch(() => null);
+  if (ch && ch.isTextBased() && 'send' in ch) await ch.send(content);
+
+  await msg.reply("✅ Sent to the player. They'll pay and send a screenshot to verify.");
+  return true;
 }
 
 async function stripeDeposit(i: ChatInputCommandInteraction | StringSelectMenuInteraction | ButtonInteraction, platformId: string): Promise<void> {
@@ -218,7 +307,7 @@ async function stripeDepositChannel(msg: Message, platformId: string): Promise<v
 // The Stripe payment link caps at $500, so show that ceiling, not the global max.
 const STRIPE_MAX_CENTS = 50000;
 const stripeText = (cfg: { min_amount: number; max_amount: number }) =>
-  `💳 **Pay by Card, Apple Pay, or Cash App Pay**\n\nTap below, enter the amount you want to add (between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay. ` +
+  `💳 **Pay by Card or Apple Pay**\n\nTap below, enter the amount you want to add (between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay. ` +
   `Then come back here and **upload a screenshot** of the "Thanks for your payment" screen.`;
 
 /** /canceldeposit — drop the latest un-paid deposit. */
