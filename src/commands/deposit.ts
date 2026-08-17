@@ -127,7 +127,10 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
     return void (await sendPeerpayInstruction(msg, fills[0]!, m!));
   }
   // Staff Provide tier: a human sends the handle. Ask staff in the admin channel.
+  // Clear any stale addFillId so a screenshot sent WHILE waiting can't attach to an
+  // old fill; handleStaffReply sets it once staff hand over the handle.
   if (fills.length === 1 && fills[0]!.payout_handle === 'STAFF') {
+    ses(msg.author.id).addFillId = undefined;
     return void (await sendStaffProvideInstruction((c) => sendChannel(msg, c), msg.channelId, msg.client, fills[0]!, m!.name));
   }
 
