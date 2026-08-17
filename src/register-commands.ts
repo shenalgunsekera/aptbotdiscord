@@ -29,6 +29,10 @@ export const COMMANDS = [
     .addStringOption((o) => o.setName('reason').setDescription('Why (optional)')),
   new SlashCommandBuilder().setName('paymentchannel').setDescription('(admin) Make this channel the payments feed'),
   new SlashCommandBuilder().setName('adminchannel').setDescription('(admin) Make this channel the admin channel'),
+  new SlashCommandBuilder().setName('setadmin').setDescription('(owner) Make someone an admin')
+    .addUserOption((o) => o.setName('user').setDescription('Who to make an admin').setRequired(true))
+    .addStringOption((o) => o.setName('email').setDescription('Their email — how they sign in to the website').setRequired(true))
+    .addBooleanOption((o) => o.setName('owner').setDescription('Make them an owner instead of an admin')),
 ].map((c) => c.toJSON());
 
 export async function registerCommands(): Promise<void> {

@@ -233,6 +233,40 @@ export async function setChannel(i: ChatInputCommandInteraction, which: 'payment
   });
 }
 
+/**
+ * /setadmin @user email [owner] — the owner makes someone an admin. Mirrors the
+ * Telegram /setadmin: owner-only, an email is required (it is how they sign in to
+ * the panel). A Discord mention hands us their user id directly, so no reply-trick
+ * is needed. admin_upsert_discord links the Discord account to a shared admin row.
+ */
+export async function setAdmin(i: ChatInputCommandInteraction): Promise<void> {
+  const [me] = await db()<{ id: string; role: string }[]>`
+    select a.id, a.role from admins a
+      join discord_admins da on da.admin_id = a.id
+     where da.discord_id = ${i.user.id} and not a.disabled`;
+  if (!me) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  if (me.role !== 'owner') return void (await i.reply({ ephemeral: true, content: 'Only the owner can add admins.' }));
+
+  const target = i.options.getUser('user', true);
+  const email = i.options.getString('email', true).trim();
+  const wantsOwner = i.options.getBoolean('owner') ?? false;
+  if (target.bot) return void (await i.reply({ ephemeral: true, content: "That's a bot — pick a person." }));
+  const name = target.globalName ?? target.username;
+
+  try {
+    const [a] = await mutate(async (sql) => await sql<{ display_name: string | null; email: string; role: string }[]>`
+      select display_name, email, role from admin_upsert_discord(
+        ${target.id}, ${name}, ${email}, ${wantsOwner ? 'owner' : 'admin'}, ${me.id}::uuid)`);
+    await i.reply({
+      ephemeral: false,
+      content:
+        `✅ **${a!.display_name ?? name}** ${a!.role === 'owner' ? 'is now an owner' : 'is now an admin'}. ` +
+        `They can act here right away. To use the website, they sign in with Google using ` +
+        `**${a!.email}** — it links automatically.`,
+    });
+  } catch (e) { return void (await fail(i, e)); }
+}
+
 function amountModal(customId: string, label: string): ModalBuilder {
   return new ModalBuilder().setCustomId(customId).setTitle(label)
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('amount').setLabel(label).setStyle(TextInputStyle.Short).setRequired(true)));
