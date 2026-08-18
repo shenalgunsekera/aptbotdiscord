@@ -38,14 +38,27 @@ export async function approve(i: ButtonInteraction, ppId: string): Promise<void>
  */
 export async function verify(i: ButtonInteraction, fillId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
-  try { await mutate(async (sql) => await sql`select fill_admin_verify(${fillId}::uuid, ${a.id}::uuid, 'verified via discord')`); } catch (e) { return void (await fail(i, e)); }
+  try {
+    await mutate(async (sql) => await sql`select fill_admin_verify(${fillId}::uuid, ${a.id}::uuid, 'verified via discord')`);
+  } catch (e) {
+    if (!isUserError(e)) return void (await fail(i, e));
+    // Already released/handled — verified in the panel, by another admin, or this
+    // card went stale. Don't dead-end: refresh it to the step it's actually at.
+  }
+  await advanceLoaderCard(i, a.id, fillId);
+}
 
-  const [o] = await db()<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string }[]>`
-    select id, delta, currency, player_name, platform_uid from loader_orders
+/** Turn the verify card into the loader "ADD" step (or a done/closed summary).
+ *  Safe whether we just released the fill or found it already released. */
+async function advanceLoaderCard(i: ButtonInteraction, adminId: string, fillId: string): Promise<void> {
+  const [o] = await db()<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string; status: string }[]>`
+    select id, delta, currency, player_name, platform_uid, status from loader_orders
      where ref_type='fill' and ref_id=${fillId} order by created_at desc limit 1`;
   if (!o) return void (await i.update({ content: `✅ **Verified & released** · by ${i.user.username}`, components: [], embeds: [] }));
+  if (o.status === 'done') return void (await i.update({ content: `✅ **Verified & loaded** — ${money(o.delta, o.currency)} added to their table.`, components: [], embeds: [] }));
+  if (o.status === 'cancelled' || o.status === 'failed') return void (await i.update({ content: `✅ **Verified** — loading was ${o.status}.`, components: [], embeds: [] }));
 
-  try { await mutate(async (sql) => await sql`select loader_order_claim(${o.id}::uuid, ${a.id}::uuid)`); } catch { /* raced */ }
+  try { await mutate(async (sql) => await sql`select loader_order_claim(${o.id}::uuid, ${adminId}::uuid)`); } catch { /* raced */ }
   await db()`update notifications set status='skipped' where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
   const r = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`lo:done:${o.id}:${o.delta}`).setLabel(`✅ Done — added ${money(o.delta, o.currency)}`).setStyle(ButtonStyle.Success),
