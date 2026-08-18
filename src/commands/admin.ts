@@ -77,18 +77,32 @@ export async function discard(i: ButtonInteraction, fillId: string): Promise<voi
 /** Claim a loader job → swap to do/fail actions. */
 export async function loaderClaim(i: ButtonInteraction, orderId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
-  try { await mutate(async (sql) => await sql`select loader_order_claim(${orderId}::uuid, ${a.id}::uuid)`); } catch (e) { return void (await fail(i, e)); }
-  const [o] = await db()<{ delta: number; currency: string; player_name: string; platform_uid: string }[]>`
-    select delta, currency, player_name, platform_uid from loader_orders where id = ${orderId}`;
-  if (!o) return;
+  try {
+    await mutate(async (sql) => await sql`select loader_order_claim(${orderId}::uuid, ${a.id}::uuid)`);
+  } catch (e) {
+    if (!isUserError(e)) return void (await fail(i, e));
+    // Already claimed/done — don't dead-end; refresh the card to its real state.
+  }
+  await showLoaderStep(i, orderId);
+}
+
+/** Render a loader order's current step: the Done/Failed action (with who claimed
+ *  it) while pending/claimed, or a done/closed summary. Self-heals a stale card. */
+async function showLoaderStep(i: ButtonInteraction, orderId: string): Promise<void> {
+  const [o] = await db()<{ delta: number; currency: string; player_name: string; platform_uid: string; status: string; claimer: string | null }[]>`
+    select o.delta, o.currency, o.player_name, o.platform_uid, o.status, a.display_name as claimer
+      from loader_orders o left join admins a on a.id = o.claimed_by where o.id = ${orderId}`;
+  if (!o) return void (await i.update({ content: '↩️ That task no longer exists.', components: [], embeds: [] }));
   const load = o.delta > 0;
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (o.status === 'done') return void (await i.update({ content: `✅ **Done** — ${money(Math.abs(o.delta), o.currency)} ${load ? 'added' : 'taken off'}.`, components: [], embeds: [] }));
+  if (o.status === 'cancelled' || o.status === 'failed') return void (await i.update({ content: `⚠️ **${o.status[0]!.toUpperCase() + o.status.slice(1)}** — ${money(Math.abs(o.delta), o.currency)}.`, components: [], embeds: [] }));
+
   const r = new ActionRowBuilder<ButtonBuilder>();
   r.addComponents(new ButtonBuilder().setCustomId(`lo:done:${orderId}:${o.delta}`).setLabel(load ? `✅ Done — added ${money(o.delta, o.currency)}` : `✅ All ${money(-o.delta, o.currency)}`).setStyle(ButtonStyle.Success));
   if (!load) r.addComponents(new ButtonBuilder().setCustomId(`lo:short:${orderId}`).setLabel('✏️ Different amount').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`lo:done:${orderId}:0`).setLabel('❌ Nothing there').setStyle(ButtonStyle.Secondary));
   else r.addComponents(new ButtonBuilder().setCustomId(`lo:fail:${orderId}`).setLabel('❌ Failed').setStyle(ButtonStyle.Danger));
-  rows.push(r);
-  await i.update({ content: `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}** — Player: **${o.player_name}** \`${o.platform_uid}\`\n_Claimed by ${i.user.username}._ Tap the amount you actually ${load ? 'added' : 'took off'}:`, components: rows });
+  const by = o.claimer ? `_Claimed by ${o.claimer}._` : '';
+  await i.update({ content: `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}** — Player: **${o.player_name}** \`${o.platform_uid}\`\n${by} Tap the amount you actually ${load ? 'added' : 'took off'}:`, components: [r] });
 }
 
 export async function loaderDone(i: ButtonInteraction, orderId: string, delta: number): Promise<void> {
