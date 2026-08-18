@@ -1,5 +1,3 @@
-import { createCheckout } from '@zkp2p/pay-sdk';
-
 /**
  * Mint a PeerPay (ZKP2P Pay) checkout link for a deposit. Mirror of the Telegram
  * bot's @union/core peerpay helper. The player pays through the returned URL and
@@ -27,6 +25,7 @@ export async function peerpayCheckout(opts: {
   const usdc = (opts.amountCents / 100).toFixed(2);
 
   try {
+    const { createCheckout } = await import('@zkp2p/pay-sdk');
     const r = await createCheckout(
       {
         requestedUsdcAmount: usdc,
