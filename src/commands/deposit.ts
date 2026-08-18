@@ -230,7 +230,7 @@ export async function peerpayBackup(i: ButtonInteraction, fillId: string): Promi
 async function sendStaffProvideInstruction(
   send: (c: string) => Promise<unknown>, channelId: string, client: Client, f: Fill, methodName: string,
 ): Promise<void> {
-  await send(`⏳ **Hold on a moment** — a staff member is getting you a payment handle for **${money(f.amount, f.currency)}**. You'll get it right here shortly.`);
+  await send(`⏳ **Hold on a moment** — a staff member is getting you a payment handle for **${money(f.amount, f.currency)}**. You'll get it right here shortly.\n_Changed your mind? \`/canceldeposit\` anytime before you pay._`);
   const [cfg] = await db()<{ discord_admin_channel_id: string | null }[]>`select discord_admin_channel_id from config where id`;
   const adminChan = cfg?.discord_admin_channel_id;
   const ach = adminChan ? await client.channels.fetch(adminChan).catch(() => null) : null;
@@ -326,7 +326,8 @@ const stripeText = (cfg: { min_amount: number; max_amount: number }, methodCode 
     ? 'Tap below, choose **Cash App Pay** on the page, then enter the amount you want to add '
     : 'Tap below, enter the amount you want to add ';
   return `${title}\n\n${step1}(between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay. ` +
-    `Then come back here and **upload a screenshot** of the "Thanks for your payment" screen.`;
+    `Then come back here and **upload a screenshot** of the "Thanks for your payment" screen.\n` +
+    `_Changed your mind? Just don't pay — nothing is charged until you do._`;
 };
 
 /** /canceldeposit — drop the latest un-paid deposit. */

@@ -187,7 +187,7 @@ export function render(n: Notification): Rendered | null {
     case 'fill.receipt_admin': {
       const urls: string[] = (Array.isArray(p.urls) ? p.urls : [p.url]).filter((u: string) => u && !String(u).startsWith('telegram:'));
       const who = p.from_name ?? p.name;
-      const tag = p.platform ? ` [${p.platform}]` : '';
+      const tag = p.platform ? ` [${p.platform}${p.club ? ' · ' + p.club : ''}]` : '';
       return {
         content: `🏦 **Payment to verify — receipt${urls.length > 1 ? 's' : ''} attached**\n` +
           `${who ? `From: **${who}**${tag}\n` : ''}Amount: **${m(p.amount, p.currency)}** (${p.method})` +
