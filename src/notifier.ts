@@ -168,12 +168,13 @@ export function render(n: Notification): Rendered | null {
     case 'loader.work': {
       const load = Number(p.delta) > 0;
       const reload = p.reason === 'withdraw.cancel_reload';
+      const who = `${p.account ?? p.player_name}${p.platform ? ` [${p.platform}]` : ''}`;
       return {
         content: reload
           ? `↩️ **Player cancelled a cash-out — re-load ${m(Math.abs(Number(p.delta)), p.currency)}**\n` +
-            `Player: **${p.player_name}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
+            `Player: **${who}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
           : `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}**\n` +
-            `Player: **${p.player_name}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
+            `Player: **${who}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
         components: row(btn('✋ Claim', `lo:claim:${n.ref_id}`, ButtonStyle.Primary)),
       };
     }
@@ -185,9 +186,11 @@ export function render(n: Notification): Rendered | null {
       };
     case 'fill.receipt_admin': {
       const urls: string[] = (Array.isArray(p.urls) ? p.urls : [p.url]).filter((u: string) => u && !String(u).startsWith('telegram:'));
+      const who = p.from_name ?? p.name;
+      const tag = p.platform ? ` [${p.platform}]` : '';
       return {
         content: `🏦 **Payment to verify — receipt${urls.length > 1 ? 's' : ''} attached**\n` +
-          `${p.name ? 'From: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}** (${p.method})` +
+          `${who ? `From: **${who}**${tag}\n` : ''}Amount: **${m(p.amount, p.currency)}** (${p.method})` +
           (p.payout_handle ? `\nTo: \`${p.payout_handle}\`` : '') +
           (p.payout_name ? `\nName: **${p.payout_name}**` : '') +
           (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') + `\nCheck it landed, then Verify — or Discard if it didn't.`,
