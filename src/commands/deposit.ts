@@ -11,6 +11,8 @@ import { peerpayCheckout } from '../peerpay.js';
 import type { PaymentMethod, Fill, Player } from '../core/index.js';
 
 const STRIPE_LINK = () => process.env.STRIPE_PAYMENT_LINK ?? 'https://buy.stripe.com/5kQbJ2gdf2BE9TtbGDc3m07';
+// The Stripe payment link caps at $500 — the most we accept for a card/Apple Pay deposit.
+const STRIPE_MAX_CENTS = 50000;
 
 /** /deposit — add money. platform → club → method → amount → pay → receipt. */
 export async function deposit(i: ChatInputCommandInteraction): Promise<void> {
@@ -99,6 +101,11 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
     select club_handle_for(${s.addMethod}::uuid, ${amount}::bigint) as handle`;
   const h = tier?.handle;
   if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
+    // The card/Apple Pay link caps at $500 — don't accept more, or they'd pay $500
+    // but we'd have the larger figure they typed on file.
+    if (amount > STRIPE_MAX_CENTS) {
+      return void (await msg.reply(`The largest card / Apple Pay payment is **${whole(STRIPE_MAX_CENTS)}**. Enter a smaller amount, or use another method.`));
+    }
     s.pending = undefined;
     s.stripeAmount = amount;
     return void (await stripeDepositChannel(msg, s.addPlatform, code, amount));
