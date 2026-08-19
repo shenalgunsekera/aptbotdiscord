@@ -140,12 +140,10 @@ export async function payments(i: ChatInputCommandInteraction): Promise<void> {
       // A payment can have up to two screenshots now — show every one. Discord
       // can only render an http(s) image URL inline; a Telegram-only file_id
       // ("telegram:…") stays as its text link above.
-      const urls: string[] = (Array.isArray(pay.receipts) && pay.receipts.length
-        ? pay.receipts : [pay.receipt]).filter((u: unknown): u is string => !!u);
-      for (const url of urls) {
-        if (!String(url).startsWith('http') || seen.has(url)) continue;
-        seen.add(url);
-        imgUrls.push(url);
+      for (const rc of receiptsOf(pay)) {
+        if (!String(rc.url).startsWith('http') || seen.has(rc.url)) continue;
+        seen.add(rc.url);
+        imgUrls.push(rc.url);
       }
     }
   }
@@ -168,19 +166,33 @@ function renderCashout(w: any, brief = false): string {
   if (pays.length && !brief) {
     for (const [idx, pay] of pays.entries()) out.push(payLine(idx, pay));
   } else if (pays.length && brief) {
-    const withReceipts = pays.filter((x) => x.receipt);
-    for (const [idx, pay] of withReceipts.entries()) {
-      out.push(`  📄 [Receipt ${pay.receipt_ref ?? idx + 1}](${pay.receipt}) — ${money(pay.amount)}`);
+    for (const pay of pays) {
+      const links = receiptLinks(pay);
+      if (links) out.push(`  💵 ${money(pay.amount)}${links}`);
     }
   }
   return out.join('\n');
+}
+
+/** Every receipt on a payment as {url, ref}. Prefers the new `receipts` array
+ *  (all screenshots); falls back to the singular `receipt`/`receipt_ref`. */
+function receiptsOf(pay: any): { url: string; ref?: string }[] {
+  const list = Array.isArray(pay.receipts) && pay.receipts.length
+    ? pay.receipts.map((r: any) => (typeof r === 'string' ? { url: r } : r))
+    : (pay.receipt ? [{ url: pay.receipt, ref: pay.receipt_ref }] : []);
+  return list.filter((r: any) => r?.url);
+}
+
+/** Markdown links for ALL of a payment's receipts, each on its own line. */
+function receiptLinks(pay: any): string {
+  return receiptsOf(pay).map((r) => `\n     📄 [Receipt ${r.ref ?? ''}](${r.url})`).join('');
 }
 
 function renderDeposit(d: any, brief = false): string {
   const out: string[] = [`**${money(d.amount)}** via ${d.method} — _${friendlyStatus('deposit', d.status)}_`];
   const pays = (d.payments ?? []) as any[];
   for (const [idx, pay] of pays.entries()) {
-    if (brief && !pay.receipt) continue;
+    if (brief && receiptsOf(pay).length === 0) continue;
     out.push(payLine(idx, pay, pay.to));
   }
   return out.join('\n');
@@ -192,6 +204,6 @@ function payLine(idx: number, pay: any, to?: string): string {
     `  ${tick} Payment ${idx + 1}: **${money(pay.amount)}**` +
     (to ? ` to \`${to}\`` : '') +
     (pay.ref ? ` — ref \`${pay.ref}\`` : '') +
-    (pay.receipt ? `\n     📄 [Receipt ${pay.receipt_ref ?? ''}](${pay.receipt})` : '')
+    receiptLinks(pay)
   );
 }
