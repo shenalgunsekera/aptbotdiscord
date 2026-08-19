@@ -190,7 +190,7 @@ export async function sbMade(i: ButtonInteraction, playerId: string): Promise<vo
 export async function stripeOk(i: ButtonInteraction, claimId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select stripe_claim_credit(${claimId}::uuid, ${a.id}::uuid, null)`); } catch (e) { return void (await fail(i, e)); }
-  await done(i, `✅ **Credited** · by ${i.user.username}`);
+  await i.update({ content: `✅ **Credited** · by ${i.user.username}`, components: [], embeds: [] });
 }
 export async function stripeCredit(i: ButtonInteraction, claimId: string): Promise<void> {
   if (!(await admin(i))) return;
@@ -200,7 +200,7 @@ export async function stripeCredit(i: ButtonInteraction, claimId: string): Promi
 export async function stripeDiscard(i: ButtonInteraction, claimId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select stripe_claim_discard(${claimId}::uuid, ${a.id}::uuid)`); } catch (e) { return void (await fail(i, e)); }
-  await done(i, `🗑 **Discarded** · by ${i.user.username}`);
+  await i.update({ content: `🗑 **Discarded** · by ${i.user.username}`, components: [], embeds: [] });
 }
 export async function stripeCreditAmount(i: ModalSubmitInteraction, claimId: string): Promise<void> {
   const a = await admin(i); if (!a) return;

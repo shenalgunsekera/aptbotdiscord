@@ -153,6 +153,7 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
   }
   if (m?.code === 'paypal') lines.push('⚠️ **Make sure to send as Friends & Family** (not Goods & Services).\n');
   lines.push(`Once you've sent it, send ${receiptInstruction(m!.code)} here (upload the image) so we can confirm it.`);
+  lines.push('_Got two screenshots? Attach **both to the same message** — a second one sent on its own won\'t be picked up._');
   lines.push('_Changed your mind? `/canceldeposit` before you pay._');
   ses(msg.author.id).addFillId = fills[0]!.id;
   await sendChannel(msg, lines.join('\n'));
@@ -353,6 +354,16 @@ export async function cancelDeposit(i: ChatInputCommandInteraction): Promise<voi
   if (!p) return void (await say(i, 'Send `/start` first.'));
   const d = await mutate(async (sql) => sql<{ id: string }[]>`select id from deposit_cancel_latest(${p.id}::uuid)`);
   clearSes(i.user.id);
-  if (!d[0]?.id) return void (await say(i, "You don't have a deposit to cancel. (If you already sent a receipt, it's being checked — /support if you need help.)"));
+  if (!d[0]?.id) {
+    // Nothing un-paid to cancel — but if a receipt is already in, say THAT clearly.
+    // It can't be cancelled (the payment may have gone through); an admin verifies it.
+    const [chk] = await db()<{ amount: number; currency: string }[]>`
+      select amount, currency from deposit_requests
+       where player_id = ${p.id} and status = 'awaiting_confirmation' order by created_at desc limit 1`;
+    if (chk) {
+      return void (await say(i, `⏳ Your **${money(chk.amount, chk.currency)}** payment is being checked by our team — it can't be cancelled now. You'll get a message here the moment it's confirmed. \`/support\` if you need help.`));
+    }
+    return void (await say(i, "You don't have a deposit to cancel. Start one anytime with `/deposit`."));
+  }
   await say(i, '✅ Your deposit was cancelled. If you already sent the money, use /support and we\'ll sort it out.');
 }
