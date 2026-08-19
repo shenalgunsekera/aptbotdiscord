@@ -127,7 +127,7 @@ export function render(n: Notification): Rendered | null {
       };
     }
     case 'fill.lock_expired':
-      return { content: `⏱ **Your payment timed out.** The ${m(p.amount, p.currency)} went back in the queue. If you already sent it, message us now.` };
+      return { content: `⏱ **Time's up on your ${m(p.amount, p.currency)} deposit.** No payment arrived in time, so it was cancelled. Start again with \`/deposit\` to try once more. If you already sent it, message us with \`/support\`.` };
     case 'deposit.discarded':
       return { content: `❌ **Your ${m(p.amount, p.currency)} payment couldn't be verified** and was discarded.\nIf you did send it, message us with \`/support\`. Otherwise you can start again with \`/deposit\`.` };
     case 'withdraw.queued':

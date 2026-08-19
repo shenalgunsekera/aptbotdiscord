@@ -5,7 +5,7 @@ import {
 import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { ses, clearSes } from '../session.js';
-import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
+import { money, whole, parseAmount, amountProblem, receiptInstruction, windowLabel } from '../words.js';
 import { confirmedPlatforms, depositMethods, methodOption, say, sayChat, sendChannel, selectRow } from '../flows.js';
 import { peerpayCheckout } from '../peerpay.js';
 import type { PaymentMethod, Fill, Player } from '../core/index.js';
@@ -133,7 +133,8 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
     return void (await sendStaffProvideInstruction((c) => sendChannel(msg, c), msg.channelId, msg.client, fills[0]!, m!.name));
   }
 
-  const lines: string[] = [`**💸 Send your ${m!.name} payment now — you have 5 minutes**\n`];
+  const [tcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
+  const lines: string[] = [`**💸 Send your ${m!.name} payment now — you have ${windowLabel(tcfg?.match_timeout_seconds ?? 300)}**\n`];
   if (fills.length > 1) lines.push(`Your ${money(amount)} is split across **${fills.length} people**. Pay **each** separately:\n`);
   for (const [idx, f] of fills.entries()) {
     if (fills.length > 1) lines.push(`**── Payment ${idx + 1} of ${fills.length} ──**`);

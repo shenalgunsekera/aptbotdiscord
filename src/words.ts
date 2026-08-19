@@ -95,6 +95,12 @@ export function cashoutConfirm(code: string, methodName: string, handle: string,
   }
 }
 
+/** The payment window, worded from the configured match timeout (seconds). */
+export function windowLabel(seconds: number): string {
+  const mins = Math.max(1, Math.round((seconds || 0) / 60));
+  return mins === 1 ? '1 minute' : `${mins} minutes`;
+}
+
 /** A player-facing status label, never the internal one. Mirrors the Telegram bot. */
 export function friendlyStatus(kind: 'deposit' | 'withdraw', status: string): string {
   const map: Record<string, string> = {
