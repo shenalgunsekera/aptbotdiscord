@@ -94,3 +94,23 @@ export function cashoutConfirm(code: string, methodName: string, handle: string,
       return `✅ **Cash-out started!**\n\nYour ${methodName} \`${handle}\` has been added to the queue. You'll receive **${amount}** within 24 hours.`;
   }
 }
+
+/** A player-facing status label, never the internal one. Mirrors the Telegram bot. */
+export function friendlyStatus(kind: 'deposit' | 'withdraw', status: string): string {
+  const map: Record<string, string> = {
+    // deposit
+    matching: 'setting up',
+    awaiting_payment: 'waiting for your payment',
+    awaiting_confirmation: 'checking your payment',
+    // withdraw
+    pending_unload: 'getting your money ready',
+    queued: 'waiting to be paid',
+    partially_filled: 'partly paid',
+    filled: 'almost done',
+    // both
+    completed: 'done',
+    cancelled: 'cancelled',
+    expired: 'expired',
+  };
+  return map[status] ?? status.replace(/_/g, ' ');
+}

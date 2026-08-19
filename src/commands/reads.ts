@@ -4,7 +4,7 @@ import {
 } from 'discord.js';
 import { db } from '../db.js';
 import { currentPlayer } from '../identity.js';
-import { money } from '../words.js';
+import { money, friendlyStatus } from '../words.js';
 import { say } from '../flows.js';
 
 const GUIDE =
@@ -66,19 +66,127 @@ export async function pending(i: ChatInputCommandInteraction): Promise<void> {
   await i.reply({ ephemeral: true, content: lines.join('\n') });
 }
 
-/** /payments — completed history. */
+/**
+ * /payments — the player's own money tracker (ported from the Telegram bot).
+ *
+ * A $100 cash-out paid as 50 + 25 + 25 by three different people is three
+ * payments, and the player must be able to see each one AND its receipt any
+ * time — including a cross-platform payout, where a Telegram payer settles this
+ * Discord player's cash-out. player_payments()/player_deposits() are scoped to
+ * this player's id, so a player never sees another player's payments or receipts.
+ *
+ * ONGOING first, in full detail with receipts; a few recently-finished follow,
+ * receipts still linked. The actual receipt IMAGES are posted for what a player
+ * is actively watching (everything in progress + the single most recent finished
+ * cash-out), so a Discord player can view the screenshot(s) they were paid with.
+ */
+const ONGOING_WD = new Set(['pending_unload', 'queued', 'partially_filled', 'filled']);
+const ONGOING_DEP = new Set(['matching', 'awaiting_payment', 'awaiting_confirmation']);
+
 export async function payments(i: ChatInputCommandInteraction): Promise<void> {
   const p = await currentPlayer(i.user.id);
   if (!p) return void (await say(i, 'Send `/start` first.'));
-  const rows = await db()<{ kind: string; amount: number; currency: string; when: Date }[]>`
-    select 'Added' as kind, amount, currency, completed_at as when from deposit_requests
-      where player_id = ${p.id} and status = 'completed'
-    union all
-    select 'Cashed out' as kind, requested_amount as amount, currency, completed_at as when from withdraw_requests
-      where player_id = ${p.id} and status = 'completed'
-    order by when desc nulls last limit 15`;
-  if (!rows.length) return void (await i.reply({ ephemeral: true, content: 'No completed payments yet.' }));
-  const embed = new EmbedBuilder().setTitle('Your payments')
-    .setDescription(rows.map((r) => `**${r.kind} ${money(r.amount, r.currency)}** — ${r.when ? new Date(r.when).toLocaleDateString() : ''}`).join('\n'));
-  await i.reply({ ephemeral: true, embeds: [embed] });
+  // Two queries + image embeds can exceed Discord's 3s ack window; defer first.
+  await i.deferReply({ ephemeral: true });
+
+  const outs = await db()<any[]>`select * from player_payments(${p.id}::uuid) limit 25`;
+  const deps = await db()<any[]>`select * from player_deposits(${p.id}::uuid) limit 25`;
+
+  if (!outs.length && !deps.length) {
+    await i.editReply("You haven't added or cashed out any money yet. Use `/deposit` or `/withdraw` to start.");
+    return;
+  }
+
+  // Only show payments that actually went through — never cancelled/expired ones.
+  const outOngoing = outs.filter((w) => ONGOING_WD.has(w.status));
+  const outDone = outs.filter((w) => w.status === 'completed').slice(0, 3);
+  const depOngoing = deps.filter((d) => ONGOING_DEP.has(d.status));
+  const depDone = deps.filter((d) => d.status === 'completed').slice(0, 3);
+
+  const lines: string[] = [];
+  if (outOngoing.length) {
+    lines.push('**💸 Cash-outs in progress**');
+    for (const w of outOngoing) lines.push(renderCashout(w));
+  }
+  if (depOngoing.length) {
+    lines.push('**💵 Money you\'re adding**');
+    for (const d of depOngoing) lines.push(renderDeposit(d));
+  }
+  if (outDone.length || depDone.length) {
+    lines.push('**✅ Recently finished**');
+    for (const w of outDone) lines.push(renderCashout(w, true));
+    for (const d of depDone) lines.push(renderDeposit(d, true));
+  }
+  if (!lines.length) {
+    const done = outs.filter((w) => w.status === 'completed').slice(0, 5);
+    if (done.length) {
+      lines.push('**Your recent payments**');
+      for (const w of done) lines.push(renderCashout(w, true));
+    } else {
+      lines.push('No completed payments yet.');
+    }
+  }
+
+  // Receipt IMAGES for what a player is actively watching: everything in
+  // progress plus the SINGLE most recent finished cash-out. Older ones keep
+  // their receipt LINK in the text above so nothing becomes unreachable.
+  const seen = new Set<string>();
+  const mostRecentDone = outs.find((w) => w.status === 'completed');
+  const showable = [...outOngoing, ...(mostRecentDone ? [mostRecentDone] : [])];
+  const imgUrls: string[] = [];
+  for (const w of showable) {
+    for (const pay of (w.payments ?? []) as any[]) {
+      const url = pay.receipt;
+      // Discord can only render an http(s) image URL inline; a Telegram-only
+      // file_id ("telegram:…") stays as its text link above.
+      if (!url || !String(url).startsWith('http') || seen.has(url)) continue;
+      seen.add(url);
+      imgUrls.push(url);
+    }
+  }
+
+  const summary = new EmbedBuilder().setTitle('Your payments')
+    .setDescription(lines.join('\n').trim().slice(0, 4096));
+  // One message: summary embed + up to 9 receipt-image embeds (Discord caps at 10).
+  const embeds = [summary, ...imgUrls.slice(0, 9).map((u) => new EmbedBuilder().setImage(u))];
+  await i.editReply({ embeds });
+}
+
+function renderCashout(w: any, brief = false): string {
+  const total = w.total_amount || w.requested;
+  const paid = w.amount_paid ?? 0;
+  const out: string[] = [
+    `**${money(total)}** via ${w.method} — _${friendlyStatus('withdraw', w.status)}_` +
+      (paid > 0 && paid < total ? `  (${money(paid)} / ${money(total)} paid)` : ''),
+  ];
+  const pays = (w.payments ?? []) as any[];
+  if (pays.length && !brief) {
+    for (const [idx, pay] of pays.entries()) out.push(payLine(idx, pay));
+  } else if (pays.length && brief) {
+    const withReceipts = pays.filter((x) => x.receipt);
+    for (const [idx, pay] of withReceipts.entries()) {
+      out.push(`  📄 [Receipt ${pay.receipt_ref ?? idx + 1}](${pay.receipt}) — ${money(pay.amount)}`);
+    }
+  }
+  return out.join('\n');
+}
+
+function renderDeposit(d: any, brief = false): string {
+  const out: string[] = [`**${money(d.amount)}** via ${d.method} — _${friendlyStatus('deposit', d.status)}_`];
+  const pays = (d.payments ?? []) as any[];
+  for (const [idx, pay] of pays.entries()) {
+    if (brief && !pay.receipt) continue;
+    out.push(payLine(idx, pay, pay.to));
+  }
+  return out.join('\n');
+}
+
+function payLine(idx: number, pay: any, to?: string): string {
+  const tick = pay.status === 'released' ? '✅' : pay.status === 'disputed' ? '⏸' : '⏳';
+  return (
+    `  ${tick} Payment ${idx + 1}: **${money(pay.amount)}**` +
+    (to ? ` to \`${to}\`` : '') +
+    (pay.ref ? ` — ref \`${pay.ref}\`` : '') +
+    (pay.receipt ? `\n     📄 [Receipt ${pay.receipt_ref ?? ''}](${pay.receipt})` : '')
+  );
 }
