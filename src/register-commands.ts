@@ -19,6 +19,7 @@ export const COMMANDS = [
   new SlashCommandBuilder().setName('editdeposit').setDescription('Change how you deposit'),
   new SlashCommandBuilder().setName('editwithdraw').setDescription('Change how you get paid'),
   new SlashCommandBuilder().setName('support').setDescription('Message our team'),
+  new SlashCommandBuilder().setName('stop').setDescription("Stop whatever you're in the middle of"),
   new SlashCommandBuilder().setName('guide').setDescription('What each command does'),
   new SlashCommandBuilder().setName('ping').setDescription('Health check'),
   // Admin-only, run in a player's ticket channel to correct their cash-out.

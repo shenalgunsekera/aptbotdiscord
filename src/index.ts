@@ -89,6 +89,7 @@ async function onSlash(i: any): Promise<void> {
     case 'payments': return void (await reads.payments(i));
     case 'guide': return void (await reads.guide(i));
     case 'support': return void (await reads.support(i));
+    case 'stop': return void (await reads.stop(i));
     case 'editplatform': return void (await edit.editPlatform(i));
     case 'editclubs': return void (await edit.editClubs(i));
     case 'editdeposit': return void (await edit.editDeposit(i));

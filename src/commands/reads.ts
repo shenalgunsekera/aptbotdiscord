@@ -6,6 +6,7 @@ import { db } from '../db.js';
 import { currentPlayer } from '../identity.js';
 import { money, friendlyStatus } from '../words.js';
 import { say } from '../flows.js';
+import { clearSes } from '../session.js';
 
 const GUIDE =
   '📖 **What each command does**\n\n' +
@@ -21,7 +22,8 @@ const GUIDE =
   '🏆 `/editclubs` — change which clubs you play in.\n' +
   '💳 `/editdeposit` — change which payment methods you deposit with.\n' +
   '🏦 `/editwithdraw` — change which payment methods you cash-out with.\n\n' +
-  '💬 `/support` — message our team directly.';
+  '💬 `/support` — message our team directly.\n' +
+  '🛑 `/stop` — stop whatever you\'re in the middle of.';
 
 export async function guide(i: ChatInputCommandInteraction): Promise<void> {
   await i.reply({ ephemeral: true, content: GUIDE });
@@ -29,6 +31,13 @@ export async function guide(i: ChatInputCommandInteraction): Promise<void> {
 
 export async function support(i: ChatInputCommandInteraction): Promise<void> {
   await i.reply({ ephemeral: false, content: '💬 Post your question right here — our team sees this ticket and will get back to you.' });
+}
+
+/** /stop — bail out of whatever flow the player is mid-way through. Clears the
+ *  in-memory pending state (amount/handle/etc.); durable data is never touched. */
+export async function stop(i: ChatInputCommandInteraction): Promise<void> {
+  clearSes(i.user.id);
+  await i.reply({ ephemeral: true, content: 'Okay, stopped. 👍' });
 }
 
 /** /pending — what's in motion. No available balance; only real movement. */
