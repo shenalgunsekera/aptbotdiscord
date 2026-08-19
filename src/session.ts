@@ -12,6 +12,7 @@
 export type Pending =
   | 'name' | 'acct' | 'clubgg_user' | 'sb_user' | 'sb_pass'
   | 'payout_handle' | 'payout_name' | 'dep_amount' | 'wd_amount' | 'wd_handle' | 'wd_reduce'
+  | 'wd_topup_amount'
   | 'edit_payout' | 'edit_payout_name' | 'edit_acct' | 'edit_clubgg_user' | 'cancel_amount' | 'pay_receipt';
 
 export interface Session {
@@ -27,6 +28,7 @@ export interface Session {
   wdQueue?: string[];      // chosen payout methods still needing a handle (multi-select)
   clubggUid?: string;      // ClubGG ID stashed while we ask for the username
   cancelWithdrawId?: string; // which cash-out a partial-cancel amount applies to
+  topupWithdrawId?: string;  // which cash-out an /addtowithdraw amount applies to
   payWithdrawId?: string;    // cash-out an admin is uploading a payment receipt for
   // deposit
   addPlatform?: string;

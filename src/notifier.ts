@@ -134,6 +134,10 @@ export function render(n: Notification): Rendered | null {
       };
     case 'withdraw.completed':
       return { content: `🎉 **Cash-out complete!** ${m(p.amount, p.currency)} — all done.` };
+    case 'withdraw.topup_applied':
+      return { content: `➕ **${m(p.added, p.currency)} was added to your cash-out** — it's now **${m(p.new_total, p.currency)}**.\nYou kept your place in line.` };
+    case 'withdraw.topup_none':
+      return { content: `We couldn't add to your cash-out — there was nothing extra to take off your table right now. Nothing changed.` };
     case 'withdraw.cancelled':
       return { content: `Your cash-out was cancelled and everything's back where it was.` };
     case 'withdraw.cancel_confirmed':
@@ -176,11 +180,15 @@ export function render(n: Notification): Rendered | null {
     case 'loader.work': {
       const load = Number(p.delta) > 0;
       const reload = p.reason === 'withdraw.cancel_reload';
+      const topup = p.reason === 'withdraw.topup';
       const who = `${p.account ?? p.player_name}${p.platform ? ` [${p.platform}]` : ''}`;
       return {
         content: reload
           ? `↩️ **Player cancelled a cash-out — re-load ${m(Math.abs(Number(p.delta)), p.currency)}**\n` +
             `Player: **${who}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
+          : topup
+          ? `➕ **Adding to a cash-out — take ${m(Math.abs(Number(p.delta)), p.currency)} off**\n` +
+            `Player: **${who}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nThey're adding to a cash-out already in the queue. Take it off, then mark done.`
           : `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}**\n` +
             `Player: **${who}**\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
         components: row(btn('✋ Claim', `lo:claim:${n.ref_id}`, ButtonStyle.Primary)),

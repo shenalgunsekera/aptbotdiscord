@@ -13,6 +13,7 @@ const GUIDE =
   '✖️ `/canceldeposit` — cancel your most recent deposit if you haven\'t paid yet.\n' +
   '💸 `/withdraw` — cash-out. We take it off your table and pay you the way you\'ve set up.\n' +
   '✖️ `/cancelwithdraw` — cancel a cash-out that hasn\'t been paid yet.\n' +
+  '➕ `/addtowithdraw` — add more to a cash-out already in the queue, keeping your place in line.\n' +
   '⏳ `/pending` — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n' +
   '📄 `/payments` — your history of completed payments and receipts.\n\n' +
   '**Change your setup anytime:**\n' +

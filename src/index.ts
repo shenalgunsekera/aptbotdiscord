@@ -57,6 +57,7 @@ async function routeText(msg: Message, pending: string, text: string): Promise<v
     case 'wd_amount': return void (await withdraw.onAmountText(msg, text));
     case 'wd_handle': return void (await withdraw.onHandleText(msg, text));
     case 'wd_reduce': return void (await withdraw.onReduceText(msg, text));
+    case 'wd_topup_amount': return void (await withdraw.onTopupAmountText(msg, text));
     case 'cancel_amount': return void (await withdraw.onCancelAmountText(msg, text));
     case 'edit_payout': return void (await edit.payoutHandleText(msg, text));
     case 'edit_acct': return void (await edit.acctText(msg, text));
@@ -83,6 +84,7 @@ async function onSlash(i: any): Promise<void> {
     case 'canceldeposit': return void (await deposit.cancelDeposit(i));
     case 'withdraw': return void (await withdraw.withdraw(i));
     case 'cancelwithdraw': return void (await withdraw.cancelWithdraw(i));
+    case 'addtowithdraw': return void (await withdraw.addToWithdraw(i));
     case 'pending': return void (await reads.pending(i));
     case 'payments': return void (await reads.payments(i));
     case 'guide': return void (await reads.guide(i));
@@ -138,6 +140,7 @@ async function onComponent(i: any): Promise<void> {
   if (id.startsWith('wc:full:')) return void (await withdraw.cancelFull(i, arg));
   if (id.startsWith('wc:part:')) return void (await withdraw.cancelPart(i, arg));
   if (id.startsWith('wd:reduce:')) return void (await withdraw.reducePrompt(i, arg));
+  if (id.startsWith('wt:pick:')) return void (await withdraw.topupPick(i, arg));
 
   // ── admin ──
   if (id.startsWith('pl:approve:')) return void (await admin.approve(i, arg));
