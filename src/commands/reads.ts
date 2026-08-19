@@ -136,12 +136,16 @@ export async function payments(i: ChatInputCommandInteraction): Promise<void> {
   const imgUrls: string[] = [];
   for (const w of showable) {
     for (const pay of (w.payments ?? []) as any[]) {
-      const url = pay.receipt;
-      // Discord can only render an http(s) image URL inline; a Telegram-only
-      // file_id ("telegram:…") stays as its text link above.
-      if (!url || !String(url).startsWith('http') || seen.has(url)) continue;
-      seen.add(url);
-      imgUrls.push(url);
+      // A payment can have up to two screenshots now — show every one. Discord
+      // can only render an http(s) image URL inline; a Telegram-only file_id
+      // ("telegram:…") stays as its text link above.
+      const urls: string[] = (Array.isArray(pay.receipts) && pay.receipts.length
+        ? pay.receipts : [pay.receipt]).filter((u: unknown): u is string => !!u);
+      for (const url of urls) {
+        if (!String(url).startsWith('http') || seen.has(url)) continue;
+        seen.add(url);
+        imgUrls.push(url);
+      }
     }
   }
 

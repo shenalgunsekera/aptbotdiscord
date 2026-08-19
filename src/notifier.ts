@@ -114,8 +114,16 @@ export function render(n: Notification): Rendered | null {
       return { content: `💰 **A payment of ${m(p.amount, p.currency)} is on the way to you.** We'll confirm it and let you know.` };
     case 'fill.released':
       return { content: `✅ **${m(p.credit, p.currency)} is on its way to your table.**` };
-    case 'fill.settled':
-      return { content: `✅ **${m(p.amount, p.currency)} — that part of your cash-out is done.**` };
+    case 'fill.settled': {
+      // Show the payee the proof they were paid: the screenshot(s) the payer
+      // uploaded. Discord renders public image urls (a telegram file_id can't be).
+      const urls: string[] = (Array.isArray(p.urls) ? p.urls : []).filter((u: string) => u && String(u).startsWith('http'));
+      return {
+        content: `✅ **${m(p.amount, p.currency)} — that part of your cash-out is done.**` +
+          (urls.length ? `\nHere ${urls.length > 1 ? 'are the screenshots' : 'is the screenshot'} of your payment.` : ''),
+        ...(urls.length ? { embeds: imgEmbeds(urls) } : {}),
+      };
+    }
     case 'fill.lock_expired':
       return { content: `⏱ **Your payment timed out.** The ${m(p.amount, p.currency)} went back in the queue. If you already sent it, message us now.` };
     case 'withdraw.queued':

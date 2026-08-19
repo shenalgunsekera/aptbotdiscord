@@ -12,14 +12,20 @@ import { ses, clearSes } from '../session.js';
  */
 export async function onReceiptMessage(msg: Message): Promise<void> {
   if (msg.author.bot || !msg.attachments.size) return;
-  const att = [...msg.attachments.values()].find((a) => (a.contentType ?? '').startsWith('image') || /\.(png|jpe?g|webp|pdf)$/i.test(a.name ?? ''));
+  // A player may attach up to TWO screenshots in one message. Discord delivers
+  // them all on this single message, so we collect them here (no album race like
+  // Telegram has). Keep at most two, in the order sent.
+  const atts = [...msg.attachments.values()]
+    .filter((a) => (a.contentType ?? '').startsWith('image') || /\.(png|jpe?g|webp|pdf)$/i.test(a.name ?? ''))
+    .slice(0, 2);
+  const att = atts[0];
   if (!att) return;
 
   const p = await currentPlayer(msg.author.id);
   if (!p) return;
   const s = ses(msg.author.id);
 
-  // Stripe (fixed-link) receipt.
+  // Stripe (fixed-link) receipt — one image is all we need.
   if (s.stripePlatform) {
     await handleStripe(msg, att.url, p.id, s.stripePlatform, att.contentType ?? 'image/jpeg');
     s.stripePlatform = undefined;
@@ -42,20 +48,30 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
       ? (await db()<{ platform_id: string }[]>`select platform_id from deposit_requests where id = ${f.deposit_id}`)[0]?.platform_id ?? null
       : null;
 
-    let storagePath = att.url, url = att.url, bytes: number | null = att.size ?? null, ct = att.contentType ?? 'image/jpeg';
-    if (storageConfigured()) {
-      const res = await fetch(att.url);
-      const buf = Buffer.from(await res.arrayBuffer());
-      const stored = await uploadReceipt(buf, ct, 'fill', fillId);
-      storagePath = stored.storagePath; url = stored.url; bytes = stored.bytes;
+    // Upload every attachment FIRST (Discord CDN links expire), so a failure
+    // here leaves nothing half-written and the player can simply resend. Then
+    // one transaction records all receipts, submits proof, and posts the card.
+    const stored: { storagePath: string; url: string; bytes: number | null; ct: string }[] = [];
+    for (const a of atts) {
+      const ct = a.contentType ?? 'image/jpeg';
+      let storagePath = a.url, url = a.url, bytes: number | null = a.size ?? null;
+      if (storageConfigured()) {
+        const res = await fetch(a.url);
+        const s = await uploadReceipt(Buffer.from(await res.arrayBuffer()), ct, 'fill', fillId);
+        storagePath = s.storagePath; url = s.url; bytes = s.bytes;
+      }
+      stored.push({ storagePath, url, bytes, ct });
     }
+    const urls = stored.map((s) => s.url);
 
     await mutate(async (sql) => {
-      await sql`select receipt_add(${p.id}::uuid, 'fill', ${fillId}::uuid, ${storagePath}, ${url},
-        ${platformId}::uuid, ${ct}, ${bytes}::bigint, null, ${p.id}::uuid, null)`;
+      for (const s of stored) {
+        await sql`select receipt_add(${p.id}::uuid, 'fill', ${fillId}::uuid, ${s.storagePath}, ${s.url},
+          ${platformId}::uuid, ${s.ct}, ${s.bytes}::bigint, null, ${p.id}::uuid, null)`;
+      }
       const locked = await sql<{ id: string }[]>`select id from fills where deposit_id = ${f!.deposit_id} and status = 'locked' order by seq`;
       for (const lf of locked) await sql`select fill_submit_proof(${lf.id}::uuid, null, null, false)`;
-      // Send the receipt to the admin channel for verification.
+      // Send the receipt(s) to the admin channel for verification, as one card.
       const [info] = await sql<{ amount: number; currency: string; method: string; name: string | null; payout_handle: string | null; payout_name: string | null; from_name: string | null; platform: string | null; club: string | null }[]>`
         select f.amount, f.currency, pm.name method, dp.display_name name, f.payout_handle, f.payout_name,
                pf.name as platform, c.name as club,
@@ -68,7 +84,7 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
           left join clubs c on c.id = pp.club_id
          where f.id = ${fillId}`;
       await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json({
-        fill_id: fillId, urls: [url], amount: info?.amount, currency: info?.currency, method: info?.method, name: info?.name,
+        fill_id: fillId, urls, amount: info?.amount, currency: info?.currency, method: info?.method, name: info?.name,
         from_name: info?.from_name ?? info?.name, platform: info?.platform, club: info?.club,
         payout_handle: info?.payout_handle, payout_name: info?.payout_name,
       }) as any}::jsonb)`;
@@ -80,7 +96,7 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
     return;
   }
   clearSes(msg.author.id);
-  await msg.reply("✅ **Got your receipt!** We'll check your payment and add your money — you'll get a message here the moment it's done.");
+  await msg.reply(`✅ **Got your ${atts.length > 1 ? 'receipts' : 'receipt'}!** We'll check your payment and add your money — you'll get a message here the moment it's done.`);
 }
 
 async function handleStripe(msg: Message, attUrl: string, playerId: string, platformId: string, ct: string): Promise<void> {
