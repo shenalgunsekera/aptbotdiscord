@@ -161,12 +161,13 @@ async function sendPeerpayInstruction(msg: Message, f: Fill, m: PaymentMethod): 
     if (await switchToBackupMsg(msg, f)) return;
     return void (await sendChannel(msg, "We couldn't set up the payment link right now. Please /support and we'll sort it out — nothing was charged."));
   }
+  const [pcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
   const rowc = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(url),
     new ButtonBuilder().setCustomId(`pp:backup:${f.id}`).setLabel(`⚠️ ${m.name} not available?`).setStyle(ButtonStyle.Secondary),
   );
   await sendChannel(msg,
-    `**💸 Pay ${money(f.amount, f.currency)} — you have a few minutes**\n\n` +
+    `**💸 Pay ${money(f.amount, f.currency)} — you have ${windowLabel(pcfg?.match_timeout_seconds ?? 300)}**\n\n` +
       `1. Tap **Pay now**.\n` +
       `2. Choose **${m.name}** on the page and send the payment.\n` +
       `3. Come back and **upload a screenshot** of the confirmation here so we can add your money.\n\n` +
