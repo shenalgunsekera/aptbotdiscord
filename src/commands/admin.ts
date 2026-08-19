@@ -196,6 +196,12 @@ export async function stripeCredit(i: ButtonInteraction, claimId: string): Promi
   if (!(await admin(i))) return;
   await i.showModal(amountModal(`st:creditamt:${claimId}`, 'Amount to credit'));
 }
+/** 🗑 Discard a Stripe receipt — no credit, symmetric with a P2P/club Discard. */
+export async function stripeDiscard(i: ButtonInteraction, claimId: string): Promise<void> {
+  const a = await admin(i); if (!a) return;
+  try { await mutate(async (sql) => await sql`select stripe_claim_discard(${claimId}::uuid, ${a.id}::uuid)`); } catch (e) { return void (await fail(i, e)); }
+  await done(i, `🗑 **Discarded** · by ${i.user.username}`);
+}
 export async function stripeCreditAmount(i: ModalSubmitInteraction, claimId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
   const cents = parseCents(i.fields.getTextInputValue('amount'));

@@ -27,8 +27,9 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
 
   // Stripe (fixed-link) receipt — one image is all we need.
   if (s.stripePlatform) {
-    await handleStripe(msg, att.url, p.id, s.stripePlatform, att.contentType ?? 'image/jpeg');
+    await handleStripe(msg, att.url, p.id, s.stripePlatform, att.contentType ?? 'image/jpeg', s.stripeAmount);
     s.stripePlatform = undefined;
+    s.stripeAmount = undefined;
     return;
   }
 
@@ -99,7 +100,7 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
   await msg.reply(`✅ **Got your ${atts.length > 1 ? 'receipts' : 'receipt'}!** We'll check your payment and add your money — you'll get a message here the moment it's done.`);
 }
 
-async function handleStripe(msg: Message, attUrl: string, playerId: string, platformId: string, ct: string): Promise<void> {
+async function handleStripe(msg: Message, attUrl: string, playerId: string, platformId: string, ct: string, amount?: number): Promise<void> {
   try {
     await mutate(async (sql) => {
       const [claim] = await sql<{ id: string }[]>`insert into stripe_claims (player_id, platform_id, receipt_file_id) values (${playerId}::uuid, ${platformId}::uuid, ${attUrl}) returning id`;
@@ -110,10 +111,14 @@ async function handleStripe(msg: Message, attUrl: string, playerId: string, plat
         url = stored.url;
         await sql`update stripe_claims set receipt_url = ${url} where id = ${claim!.id}`;
       }
-      const [al] = await sql<{ amt: number | null }[]>`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
+      // Webhook amount if it matched (the actual figure), else the amount chosen in
+      // the bot — so an amount is always on file and the admin gets one-tap Verify.
+      await sql`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
+      await sql`update stripe_claims set amount = coalesce(amount, ${amount ?? null}::bigint) where id = ${claim!.id}`;
+      const [cur] = await sql<{ amount: number | null }[]>`select amount from stripe_claims where id = ${claim!.id}`;
       const [pl] = await sql<{ display_name: string | null }[]>`select display_name from players where id = ${playerId}`;
       await sql`select notify_admins('stripe.claim', 'stripe_claim', ${claim!.id}::uuid, ${sql.json({
-        claim_id: claim!.id, url, name: pl?.display_name, amount: al?.amt ?? null, currency: 'USD',
+        claim_id: claim!.id, url, name: pl?.display_name, amount: cur?.amount ?? null, currency: 'USD',
       }) as any}::jsonb)`;
     });
   } catch (e) {

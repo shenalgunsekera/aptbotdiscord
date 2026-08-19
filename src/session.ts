@@ -35,6 +35,7 @@ export interface Session {
   addMethod?: string;
   addFillId?: string;      // awaiting a receipt image for this fill
   stripePlatform?: string; // awaiting a Stripe receipt image
+  stripeAmount?: number;   // the amount the player chose for that Stripe payment
   // withdraw
   outPlatform?: string;
   outAmount?: number;

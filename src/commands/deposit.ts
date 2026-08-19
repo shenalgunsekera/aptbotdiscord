@@ -69,11 +69,9 @@ async function proceed(i: ChatInputCommandInteraction | StringSelectMenuInteract
   const s = ses(i.user.id);
   s.addPlatform = platformId;
   s.addMethod = m.id;
-  // Stripe with no tiers keeps the fast path; with tiers (e.g. > $249 → Staff) we
-  // must ask the amount here so the tier can route it.
-  const tiers = (m as { handle_tiers?: unknown }).handle_tiers;
-  const hasTiers = Array.isArray(tiers) && tiers.length > 0;
-  if (m.code === 'stripe' && !hasTiers) return void (await stripeDeposit(i, platformId, 'stripe'));
+  // Every method — Stripe/card included — asks the amount up front now, so the
+  // player pays that exact amount and the admin gets a one-tap Verify / Discard
+  // card (same as Venmo), never a "type the amount" step.
   // Ask the amount IN CHAT (no popup form). The player just types a number; the
   // message handler picks it up via session.pending.
   s.pending = 'dep_amount';
@@ -102,7 +100,8 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
   const h = tier?.handle;
   if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
     s.pending = undefined;
-    return void (await stripeDepositChannel(msg, s.addPlatform, code));
+    s.stripeAmount = amount;
+    return void (await stripeDepositChannel(msg, s.addPlatform, code, amount));
   }
   s.pending = undefined;
   await runMatch(msg, p, s.addPlatform, amount, s.addMethod);
@@ -310,33 +309,31 @@ export async function handleStaffReply(msg: Message): Promise<boolean> {
   return true;
 }
 
-async function stripeDeposit(i: ChatInputCommandInteraction | StringSelectMenuInteraction | ButtonInteraction, platformId: string, methodCode = 'stripe'): Promise<void> {
-  const cfg = (await db()<{ min_amount: number; max_amount: number }[]>`select min_amount, max_amount from config where id`)[0]!;
-  ses(i.user.id).stripePlatform = platformId;
+async function stripeDeposit(i: ChatInputCommandInteraction | StringSelectMenuInteraction | ButtonInteraction, platformId: string, methodCode = 'stripe', amount?: number): Promise<void> {
+  const s = ses(i.user.id); s.stripePlatform = platformId; s.stripeAmount = amount;
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(STRIPE_LINK()));
-  const content = stripeText(cfg, methodCode);
+  const content = stripeText(methodCode, amount);
   if (i.replied || i.deferred) await i.followUp({ ephemeral: false, content, components: [row] });
   else await i.reply({ ephemeral: false, content, components: [row] });
 }
 
-async function stripeDepositChannel(msg: Message, platformId: string, methodCode = 'stripe'): Promise<void> {
-  const cfg = (await db()<{ min_amount: number; max_amount: number }[]>`select min_amount, max_amount from config where id`)[0]!;
-  ses(msg.author.id).stripePlatform = platformId;
+async function stripeDepositChannel(msg: Message, platformId: string, methodCode = 'stripe', amount?: number): Promise<void> {
+  const s = ses(msg.author.id); s.stripePlatform = platformId; s.stripeAmount = amount;
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(STRIPE_LINK()));
-  await sendChannel(msg, stripeText(cfg, methodCode), [row]);
+  await sendChannel(msg, stripeText(methodCode, amount), [row]);
 }
 
-// The Stripe payment link caps at $500, so show that ceiling, not the global max.
-const STRIPE_MAX_CENTS = 50000;
 // Same secure link for both; a Cash App deposit routed here pays with Cash App Pay
-// on the page, a card/Apple Pay deposit doesn't — so tailor the wording.
-const stripeText = (cfg: { min_amount: number; max_amount: number }, methodCode = 'stripe') => {
+// on the page, a card/Apple Pay deposit doesn't — so tailor the wording. The amount
+// is taken up front, so we tell them the exact figure to pay.
+const stripeText = (methodCode = 'stripe', amount?: number) => {
   const isCashapp = methodCode === 'cashapp';
   const title = isCashapp ? '💵 **Pay with Cash App Pay**' : '💳 **Pay by Card or Apple Pay**';
+  const amt = amount ? `**${money(amount)}**` : 'the amount';
   const step1 = isCashapp
-    ? 'Tap below, choose **Cash App Pay** on the page, then enter the amount you want to add '
-    : 'Tap below, enter the amount you want to add ';
-  return `${title}\n\n${step1}(between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay. ` +
+    ? `Tap below, choose **Cash App Pay** on the page, and pay ${amt}.`
+    : `Tap below and pay ${amt} on the page.`;
+  return `${title}\n\n${step1}\n` +
     `Then come back here and **upload a screenshot** of the "Thanks for your payment" screen.\n` +
     `_Changed your mind? Just don't pay — nothing is charged until you do._`;
 };

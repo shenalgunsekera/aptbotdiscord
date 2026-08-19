@@ -157,6 +157,7 @@ async function onComponent(i: any): Promise<void> {
   if (id.startsWith('wd:pay:')) return void (await admin.withdrawPay(i, arg));
   if (id.startsWith('sb:made:')) return void (await admin.sbMade(i, arg));
   if (id.startsWith('st:ok:')) return void (await admin.stripeOk(i, arg));
+  if (id.startsWith('st:discard:')) return void (await admin.stripeDiscard(i, arg));
   if (id.startsWith('st:credit:')) return void (await admin.stripeCredit(i, arg));
   if (id.startsWith('st:creditamt:')) return void (await admin.stripeCreditAmount(i, arg));
 

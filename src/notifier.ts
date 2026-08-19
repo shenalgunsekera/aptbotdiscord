@@ -128,6 +128,8 @@ export function render(n: Notification): Rendered | null {
     }
     case 'fill.lock_expired':
       return { content: `⏱ **Your payment timed out.** The ${m(p.amount, p.currency)} went back in the queue. If you already sent it, message us now.` };
+    case 'deposit.discarded':
+      return { content: `❌ **Your ${m(p.amount, p.currency)} payment couldn't be verified** and was discarded.\nIf you did send it, message us with \`/support\`. Otherwise you can start again with \`/deposit\`.` };
     case 'withdraw.queued':
       return {
         content: p.short
@@ -232,11 +234,17 @@ export function render(n: Notification): Rendered | null {
       return { content: `💸 Payment of ${approx}**${amt}** sent by **${who}** via **${src}**` };
     }
     case 'stripe.claim':
+      // Same shape as a P2P/club receipt: Verify or Discard. The amount is on file
+      // (the player's, or the webhook's), so Verify is one tap.
       return {
         content: `🍎 **Card / Apple Pay receipt — from ${p.name ?? 'a player'}**\n` +
-          (p.amount ? `Matched payment: **${m(p.amount, p.currency)}**. Check the receipt, then credit.` : `Enter the amount from the "Payment received" alert to credit.`),
+          (p.amount ? `Amount: **${m(p.amount, p.currency)}**\n` : '') +
+          `Check it landed, then Verify — or Discard if it didn't.`,
         embeds: imgEmbeds([p.url].filter(Boolean)),
-        components: p.amount ? row(btn(`✅ Verify & Credit ${m(p.amount, p.currency)}`, `st:ok:${p.claim_id}`)) : row(btn('💵 Credit (enter amount)', `st:credit:${p.claim_id}`, ButtonStyle.Primary)),
+        components: row(
+          btn(p.amount ? `✅ Verify & Credit ${m(p.amount, p.currency)}` : '✅ Verify', `st:ok:${p.claim_id}`),
+          btn('🗑 Discard', `st:discard:${p.claim_id}`, ButtonStyle.Danger),
+        ),
       };
     case 'withdraw.retracted':
       return { content: `↩️ **Cash-out cancelled by ${p.name ?? 'a player'}** — **${m(p.amount, p.currency)}** had already come off their table; **re-load it** to reimburse.` };
