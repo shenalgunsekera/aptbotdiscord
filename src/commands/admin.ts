@@ -6,6 +6,7 @@ import { db, mutate, isUserError, userMessage } from '../db.js';
 import { currentAdmin } from '../identity.js';
 import { ses } from '../session.js';
 import { money } from '../words.js';
+import { editDiscordCard } from '../notifier.js';
 
 async function admin(i: ButtonInteraction | ModalSubmitInteraction): Promise<{ id: string } | null> {
   const a = await currentAdmin(i.user.id);
@@ -60,6 +61,9 @@ async function advanceLoaderCard(i: ButtonInteraction, adminId: string, fillId: 
 
   try { await mutate(async (sql) => await sql`select loader_order_claim(${o.id}::uuid, ${adminId}::uuid)`); } catch { /* raced */ }
   await db()`update notifications set status='skipped' where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
+  // If the standalone loader card was ALREADY delivered before this verify, it's a
+  // duplicate now — neutralise it so nobody taps a dead "Add" button on it.
+  await editDiscordCard(i.client, 'loader_order', o.id, '↪️ **Being handled on the payment card above.**').catch(() => {});
   const r = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`lo:done:${o.id}:${o.delta}`).setLabel(`✅ Done — added ${money(o.delta, o.currency)}`).setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`lo:fail:${o.id}`).setLabel('❌ Failed').setStyle(ButtonStyle.Danger),
@@ -107,7 +111,13 @@ async function showLoaderStep(i: ButtonInteraction, orderId: string): Promise<vo
 
 export async function loaderDone(i: ButtonInteraction, orderId: string, delta: number): Promise<void> {
   const a = await admin(i); if (!a) return;
-  try { await mutate(async (sql) => await sql`select loader_order_complete(${orderId}::uuid, ${a.id}::uuid, ${delta}::bigint, 'via discord')`); } catch (e) { return void (await fail(i, e)); }
+  try { await mutate(async (sql) => await sql`select loader_order_complete(${orderId}::uuid, ${a.id}::uuid, ${delta}::bigint, 'via discord')`); }
+  catch (e) {
+    if (!isUserError(e)) return void (await fail(i, e));
+    // Already done/claimed elsewhere (a stale duplicate card). Don't leave a live
+    // button that dead-ends — refresh THIS card to the job's real state.
+    return void (await showLoaderStep(i, orderId));
+  }
   await done(i, `✅ **Transaction completed by ${i.user.username}**${delta === 0 ? ' — nothing was available' : ' — ' + money(Math.abs(delta))}`);
 }
 
