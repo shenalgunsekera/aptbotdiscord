@@ -235,13 +235,13 @@ async function doCancel(ctx: ButtonInteraction | Message, withdrawId: string, am
  * OFF" card admins already work) and escrowed onto the SAME cash-out row, so the
  * queue spot is kept. Mirrors the Telegram bot. See withdraw_topup (0077).
  */
-type TOut = { id: string; amount: number | null; currency: string; method: string };
+type TOut = { id: string; amount: number | null; amount_remaining: number; currency: string; method: string };
 
 export async function addToWithdraw(i: ChatInputCommandInteraction): Promise<void> {
   const p = await currentPlayer(i.user.id);
   if (!p) return void (await say(i, 'Send `/start` to set up first.'));
   const outs = await db()<TOut[]>`
-    select w.id, w.amount, w.currency, pm.name as method
+    select w.id, w.amount, w.amount_remaining, w.currency, pm.name as method
       from withdraw_requests w join payment_methods pm on pm.id = w.method_id
      where w.player_id = ${p.id} and w.status in ('queued','partially_filled')
        and w.cancel_requested_at is null
@@ -253,7 +253,9 @@ export async function addToWithdraw(i: ChatInputCommandInteraction): Promise<voi
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...outs.slice(0, 5).map((o) => new ButtonBuilder()
       .setCustomId(`wt:pick:${o.id}`)
-      .setLabel(`${money(o.amount ?? 0, o.currency)} via ${o.method}`)
+      .setLabel(o.amount_remaining < (o.amount ?? 0)
+        ? `${money(o.amount ?? 0, o.currency)} via ${o.method} (${money(o.amount_remaining, o.currency)} left)`
+        : `${money(o.amount ?? 0, o.currency)} via ${o.method}`)
       .setStyle(ButtonStyle.Secondary)),
   );
   await i.reply({ ephemeral: false, content: 'Which cash-out do you want to add to?', components: [row] });
@@ -263,7 +265,14 @@ async function promptTopupAmount(
   i: ChatInputCommandInteraction | ButtonInteraction, w: TOut,
 ): Promise<void> {
   const s = ses(i.user.id); s.pending = 'wd_topup_amount'; s.topupWithdrawId = w.id;
-  const body = `Your ${w.method} cash-out is currently **${money(w.amount ?? 0, w.currency)}**.\n\n` +
+  // Account for a partially-paid cash-out: show paid vs. still-waiting.
+  const total = w.amount ?? 0;
+  const paid = total - w.amount_remaining;
+  const state = paid > 0
+    ? `Your ${w.method} cash-out is **${money(total, w.currency)}** — **${money(paid, w.currency)}** already on its way, ` +
+      `**${money(w.amount_remaining, w.currency)}** still waiting in the queue.`
+    : `Your ${w.method} cash-out is currently **${money(total, w.currency)}**.`;
+  const body = `${state}\n\n` +
     `How much do you want to **add** to it? Just **type the number** here, like \`20\`. ` +
     `We'll take that much more off your table and add it to this same cash-out — you keep your place in line.`;
   if (i.isButton()) await i.update({ content: body, components: [] });
@@ -273,7 +282,7 @@ async function promptTopupAmount(
 export async function topupPick(i: ButtonInteraction, withdrawId: string): Promise<void> {
   const p = await currentPlayer(i.user.id); if (!p) return;
   const [w] = await db()<TOut[]>`
-    select w.id, w.amount, w.currency, pm.name as method
+    select w.id, w.amount, w.amount_remaining, w.currency, pm.name as method
       from withdraw_requests w join payment_methods pm on pm.id = w.method_id
      where w.id = ${withdrawId} and w.player_id = ${p.id}
        and w.status in ('queued','partially_filled') and w.cancel_requested_at is null`;
