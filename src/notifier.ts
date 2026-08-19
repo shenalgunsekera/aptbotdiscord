@@ -261,6 +261,10 @@ export function render(n: Notification): Rendered | null {
       return String(p.method).toLowerCase().includes('paypal')
         ? { content: `💸 **PayPal cash-out — approve a request**\nFrom: **${p.name}**\nAmount: **${m(p.amount, p.currency)}**\nApprove & pay their money request, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) }
         : { content: (p.small ? `🔹 **Small cash-out — pay it directly.** Under the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n` : '') + `💸 **Cash-out to pay** (${p.method})\n${p.name ? 'To: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}**\nSend to: \`${p.handle}\` _(tap to copy)_\nPay it, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) };
+    case 'crypto.detection_down':
+      return { content: `🚨 **Crypto auto-detection is OFF** for: ${(Array.isArray(p.methods) ? p.methods : []).join(', ') || 'some coins'}.\n` +
+        `The chain API key (\`ETHERSCAN_API_KEY\`) isn't set, so incoming USDC / USDT / ETH won't be picked up automatically. ` +
+        `Set it in the panel's Vercel env to switch detection back on. Until then, verify those deposits by hand.` };
     case 'loader.delivery_failed':
       return { content: `⚠️ **Couldn't add value** to ${p.player_name} (\`${p.platform_uid}\`) — ${m(p.delta, p.currency)}\n_${p.reason}_ — needs a human.` };
     case 'loader.failed_player':
