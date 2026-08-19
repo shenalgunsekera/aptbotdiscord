@@ -85,11 +85,13 @@ const imgEmbeds = (urls: string[]) => urls.filter(Boolean).slice(0, 4).map((u) =
  *  notifier recorded when it delivered the card. Best-effort. */
 export async function editDiscordCard(
   client: Client, refType: string, refId: string, content: string,
-  components: ActionRowBuilder<ButtonBuilder>[] = [],
+  components: ActionRowBuilder<ButtonBuilder>[] = [], kind?: string,
 ): Promise<boolean> {
-  const [n] = await db()<{ sent_chat_id: string | null; sent_message_id: string | null }[]>`
+  const sql = db();
+  const [n] = await sql<{ sent_chat_id: string | null; sent_message_id: string | null }[]>`
     select sent_chat_id, sent_message_id from notifications
      where ref_type = ${refType} and ref_id = ${refId}::uuid and platform = 'discord'
+       ${kind ? sql`and kind = ${kind}` : sql``}
        and status = 'sent' and sent_message_id is not null order by id desc limit 1`;
   if (!n?.sent_chat_id || !n.sent_message_id) return false;
   try {

@@ -207,6 +207,14 @@ async function doCancel(ctx: ButtonInteraction | Message, withdrawId: string, am
     throw e;
   }
 
+  // A small P2P (or club) cash-out may have a "pay it directly" admin card up. On
+  // a FULL cancel it's moot — neutralise it so no admin pays a cancelled one.
+  if (j.full) {
+    await editDiscordCard(client, 'withdraw_request', withdrawId,
+      '🚫 **Cancelled by the player — do not pay.** The chips are being put back on their table.',
+      [], 'withdraw.needs_payout').catch(() => {});
+  }
+
   if (j.scenario === 'pending_full') {
     await editDiscordCard(client, 'loader_order', j.order_id, '↩️ **Cash-out cancelled by the player** — nothing to take off.');
     return void (await reply('✅ Your cash-out was cancelled. Nothing was taken off your table.'));
@@ -334,6 +342,10 @@ export async function retract(i: ButtonInteraction, withdrawId: string): Promise
   if (['completed', 'cancelled'].includes(w.status)) return void (await i.reply({ ephemeral: true, content: `That cash-out is already ${w.status}.` }));
   try { await mutate(async (sql) => await sql`select withdraw_cancel(${withdrawId}::uuid, null, 'retracted by player')`); }
   catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+  // Neutralise any "pay it directly" admin card — this cash-out is cancelled.
+  await editDiscordCard(i.client, 'withdraw_request', withdrawId,
+    '🚫 **Cancelled by the player — do not pay.** Anything that came off their table is being put back.',
+    [], 'withdraw.needs_payout').catch(() => {});
   await i.reply({ ephemeral: false, content: '✅ Cancelled. If any amount was taken from your account, it will be reimbursed.' });
 }
 
