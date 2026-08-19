@@ -95,20 +95,25 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
   // Route by tier. A 'STRIPE' tier on any method — or the Stripe method's own
   // default (anything that isn't a Staff/PeerPay tier) — diverts to the fixed card
   // link before creating a deposit.
-  const [mrow] = await db()<{ code: string }[]>`select code from payment_methods where id = ${s.addMethod}`;
+  const [mrow] = await db()<{ code: string; settlement: string }[]>`select code, settlement from payment_methods where id = ${s.addMethod}`;
   const code = mrow?.code ?? '';
-  const [tier] = await db()<{ handle: string | null }[]>`
-    select club_handle_for(${s.addMethod}::uuid, ${amount}::bigint) as handle`;
-  const h = tier?.handle;
-  if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
-    // The card/Apple Pay link caps at $500 — don't accept more, or they'd pay $500
-    // but we'd have the larger figure they typed on file.
-    if (amount > STRIPE_MAX_CENTS) {
-      return void (await msg.reply(`The largest card / Apple Pay payment is **${whole(STRIPE_MAX_CENTS)}**. Enter a smaller amount, or use another method.`));
+  // A P2P method (Venmo/Zelle, Cash App/PayPal when toggled) is NEVER pre-diverted
+  // to the card link — it must reach deposit_match, which pays a queued cash-out
+  // first and only then falls to its backstop.
+  if (mrow?.settlement !== 'p2p') {
+    const [tier] = await db()<{ handle: string | null }[]>`
+      select club_handle_for(${s.addMethod}::uuid, ${amount}::bigint) as handle`;
+    const h = tier?.handle;
+    if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
+      // The card/Apple Pay link caps at $500 — don't accept more, or they'd pay $500
+      // but we'd have the larger figure they typed on file.
+      if (amount > STRIPE_MAX_CENTS) {
+        return void (await msg.reply(`The largest card / Apple Pay payment is **${whole(STRIPE_MAX_CENTS)}**. Enter a smaller amount, or use another method.`));
+      }
+      s.pending = undefined;
+      s.stripeAmount = amount;
+      return void (await stripeDepositChannel(msg, s.addPlatform, code, amount));
     }
-    s.pending = undefined;
-    s.stripeAmount = amount;
-    return void (await stripeDepositChannel(msg, s.addPlatform, code, amount));
   }
   s.pending = undefined;
   await runMatch(msg, p, s.addPlatform, amount, s.addMethod);
