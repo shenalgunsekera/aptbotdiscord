@@ -3,6 +3,7 @@ import {
   type ButtonInteraction, type ModalSubmitInteraction, type ChatInputCommandInteraction, type Message,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
+import { uploadReceipt, storageConfigured } from '../core/index.js';
 import { currentAdmin } from '../identity.js';
 import { ses } from '../session.js';
 import { money } from '../words.js';
@@ -211,50 +212,89 @@ export async function stripeCreditAmount(i: ModalSubmitInteraction, claimId: str
 }
 
 /**
- * /add · /remove — an admin corrects a player's OPEN cash-out from inside that
- * player's ticket channel. The player is found by the channel this is run in
- * (discord_players.ticket_channel_id), so there's no ID to type. Runs through
- * withdraw_adjust(): ledger-posted, audited, and the player is told.
+ * ADMIN CASH-OUT CONTROLS — run inside the player's ticket channel (the player is
+ * found by discord_players.ticket_channel_id).
+ *
+ *   /pausewithdraw   take their cash-out out of the queue so nobody else pays it
+ *   /resumewithdraw  put it back at its original place in the queue
+ *   /adjust +50      grow what they're owed by $50
+ *   /adjust -50 receipt:<img>  record a $50 payment YOU made — reduces the cash-out,
+ *                    saves the receipt to their history, completes it if it hits $0.
+ *                    Works even while paused.
  */
-export async function adjust(i: ChatInputCommandInteraction, sign: 1 | -1): Promise<void> {
-  const a = await currentAdmin(i.user.id);
-  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
-
-  const dollars = i.options.getNumber('amount', true);
-  const reason = i.options.getString('reason') ?? null;
-  const cents = Math.round(dollars * 100);
-  if (!Number.isFinite(cents) || cents <= 0) {
-    return void (await i.reply({ ephemeral: true, content: 'Enter an amount above zero, e.g. `20`.' }));
-  }
-
-  const channelId = i.channelId;
+async function ticketTarget(i: ChatInputCommandInteraction): Promise<{ id: string; name: string; withdrawId: string } | null> {
   const [pl] = await db()<{ id: string; display_name: string | null }[]>`
     select p.id, p.display_name from players p
       join discord_players dp on dp.player_id = p.id
-     where dp.ticket_channel_id = ${channelId}`;
-  if (!pl) {
-    return void (await i.reply({ ephemeral: true, content: "No player is linked to this channel, so there's nothing to adjust here." }));
-  }
-  const who = pl.display_name ?? 'this player';
-
+     where dp.ticket_channel_id = ${i.channelId}`;
+  if (!pl) { await i.reply({ ephemeral: true, content: "No player is linked to this channel, so there's nothing to do here." }); return null; }
   const [w] = await db()<{ id: string }[]>`
     select id from withdraw_requests
      where player_id = ${pl.id} and status in ('queued', 'partially_filled', 'filled')
      order by created_at desc limit 1`;
-  if (!w) {
-    return void (await i.reply({ ephemeral: true, content: `${who} has no cash-outs in progress — nothing to adjust.` }));
+  if (!w) { await i.reply({ ephemeral: true, content: `${pl.display_name ?? 'This player'} has no cash-out in progress.` }); return null; }
+  return { id: pl.id, name: pl.display_name ?? 'this player', withdrawId: w.id };
+}
+
+export async function pauseWithdraw(i: ChatInputCommandInteraction): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const t = await ticketTarget(i); if (!t) return;
+  try { await mutate(async (sql) => await sql`select withdraw_pause(${t.withdrawId}::uuid, ${a.id}::uuid)`); }
+  catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+  await i.reply({ ephemeral: false, content: `⏸ Paused ${t.name}'s cash-out — it's out of the queue, so no one else will pay it. Adjust or pay it, then \`/resumewithdraw\` when you're done.` });
+}
+
+export async function resumeWithdraw(i: ChatInputCommandInteraction): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const t = await ticketTarget(i); if (!t) return;
+  try { await mutate(async (sql) => await sql`select withdraw_resume(${t.withdrawId}::uuid, ${a.id}::uuid)`); }
+  catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+  await i.reply({ ephemeral: false, content: `▶️ Resumed ${t.name}'s cash-out — it's back in the queue at its original place.` });
+}
+
+/** /adjust amount:<±$> [receipt:<img>] — +grows the cash-out; − records a payment
+ *  you made (receipt required). */
+export async function adjustCmd(i: ChatInputCommandInteraction): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const dollars = i.options.getNumber('amount', true);
+  const cents = Math.round(Math.abs(dollars) * 100);
+  if (!Number.isFinite(cents) || cents <= 0) {
+    return void (await i.reply({ ephemeral: true, content: 'Enter a non-zero amount, e.g. `50` or `-50`.' }));
+  }
+  const t = await ticketTarget(i); if (!t) return;
+
+  if (dollars > 0) {
+    try {
+      const [r] = await mutate(async (sql) => sql<{ amount: number; amount_remaining: number; currency: string }[]>`
+        select amount, amount_remaining, currency from withdraw_adjust(${t.withdrawId}::uuid, ${cents}::bigint, ${a.id}::uuid, 'admin /adjust')`);
+      await i.reply({ ephemeral: false, content: `✅ Added ${money(cents, r!.currency)} to ${t.name}'s cash-out — now **${money(r!.amount, r!.currency)}** (${money(r!.amount_remaining, r!.currency)} still to pay). The player was told.` });
+    } catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+    return;
   }
 
+  // Negative → record a payment you made. Receipt required.
+  const receipt = i.options.getAttachment('receipt');
+  if (!receipt) {
+    return void (await i.reply({ ephemeral: true, content: 'To record a payment, attach the payment screenshot: `/adjust amount:-50 receipt:<image>`.' }));
+  }
+  await i.deferReply({ ephemeral: false });
+  // Copy the screenshot into durable storage (Discord CDN links expire) so it
+  // survives in the player's /payments history.
+  let receiptUrl = receipt.url;
+  if (storageConfigured()) {
+    try {
+      const res = await fetch(receipt.url);
+      const stored = await uploadReceipt(Buffer.from(await res.arrayBuffer()), receipt.contentType ?? 'image/jpeg', 'fill', t.withdrawId);
+      receiptUrl = stored.url;
+    } catch { /* fall back to the CDN url */ }
+  }
   try {
-    const [r] = await db()<{ amount: number; amount_remaining: number; currency: string }[]>`
-      select amount, amount_remaining, currency
-        from withdraw_adjust(${w.id}::uuid, ${sign * cents}::bigint, ${a.id}::uuid, ${reason})`;
-    await i.reply({
-      ephemeral: false,
-      content: `✅ ${sign > 0 ? 'Added' : 'Removed'} ${money(cents, r!.currency)} ${sign > 0 ? 'to' : 'from'} ${who}'s cash-out. ` +
-        `New total: **${money(r!.amount, r!.currency)}** (${money(r!.amount_remaining, r!.currency)} still to pay). The player has been told.`,
-    });
-  } catch (e) { return void (await fail(i, e)); }
+    await mutate(async (sql) => await sql`select withdraw_club_payout(${t.withdrawId}::uuid, ${a.id}::uuid, ${cents}::bigint, null, 'paid via /adjust', ${receiptUrl})`);
+  } catch (e) { if (isUserError(e)) return void (await i.editReply({ content: `❌ ${userMessage(e)}` })); throw e; }
+  await i.editReply({ content: `✅ Recorded ${money(cents)} paid to ${t.name} — the receipt was sent to them and their cash-out reduced.` });
 }
 
 /**

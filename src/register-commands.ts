@@ -22,13 +22,12 @@ export const COMMANDS = [
   new SlashCommandBuilder().setName('stop').setDescription("Stop whatever you're in the middle of"),
   new SlashCommandBuilder().setName('guide').setDescription('What each command does'),
   new SlashCommandBuilder().setName('ping').setDescription('Health check'),
-  // Admin-only, run in a player's ticket channel to correct their cash-out.
-  new SlashCommandBuilder().setName('add').setDescription('(admin) Add to this player\'s cash-out')
-    .addNumberOption((o) => o.setName('amount').setDescription('Amount to add, e.g. 20').setRequired(true))
-    .addStringOption((o) => o.setName('reason').setDescription('Why (optional)')),
-  new SlashCommandBuilder().setName('remove').setDescription('(admin) Remove from this player\'s cash-out')
-    .addNumberOption((o) => o.setName('amount').setDescription('Amount to remove, e.g. 20').setRequired(true))
-    .addStringOption((o) => o.setName('reason').setDescription('Why (optional)')),
+  // Admin-only, run in a player's ticket channel to control their cash-out.
+  new SlashCommandBuilder().setName('pausewithdraw').setDescription('(admin) Take this player\'s cash-out out of the queue'),
+  new SlashCommandBuilder().setName('resumewithdraw').setDescription('(admin) Put this player\'s cash-out back in the queue'),
+  new SlashCommandBuilder().setName('adjust').setDescription('(admin) +amount grows the cash-out; -amount records a payment you made')
+    .addNumberOption((o) => o.setName('amount').setDescription('e.g. 50 to add, or -50 to record a payment you made').setRequired(true))
+    .addAttachmentOption((o) => o.setName('receipt').setDescription('Screenshot of the payment (required for a negative amount)')),
   new SlashCommandBuilder().setName('paymentchannel').setDescription('(admin) Make this channel the payments feed'),
   new SlashCommandBuilder().setName('adminchannel').setDescription('(admin) Make this channel the admin channel'),
   new SlashCommandBuilder().setName('setadmin').setDescription('(owner) Make someone an admin')
