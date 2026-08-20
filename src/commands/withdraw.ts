@@ -230,7 +230,15 @@ async function doCancel(ctx: ButtonInteraction | Message, withdrawId: string, am
         `🎰 **TAKE OFF ${money(Math.abs(Number(o.delta)), o.currency)}** (reduced by the player)\n` +
           loaderIdentity(o), [row]);
     }
-    return void (await reply(`✅ Reduced — we'll take off **${money(Number(j.new_amount ?? 0))}** instead. Your spot in line stays.`));
+    // Be explicit: <cancelled> comes back to the table, <new_amount> is the new
+    // cash-out total. If that total sits at the minimum, say why it can't go lower.
+    const cur = o?.currency ?? 'USD';
+    const cfgRow = await db()<{ min_amount: number }[]>`select min_amount from config where id`;
+    const min_amount = cfgRow[0]?.min_amount ?? 0;
+    const atMin = min_amount > 0 && Number(j.new_amount ?? 0) <= Number(min_amount);
+    const note = atMin ? ` — that's the ${money(min_amount, cur)} minimum, so it can't go lower without cancelling it all` : '';
+    return void (await reply(
+      `✅ **${money(Number(j.cancelled ?? 0), cur)}** is coming back to your table. Your cash-out is now **${money(Number(j.new_amount ?? 0), cur)}**${note}. Your spot in line stays.`));
   }
   await reply(
     `✅ Cancellation requested. An admin will re-load **${money(Number(j.cancelled))}** back onto your table — ` +
