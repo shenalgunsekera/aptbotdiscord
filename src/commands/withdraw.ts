@@ -230,7 +230,7 @@ async function doCancel(ctx: ButtonInteraction | Message, withdrawId: string, am
         `🎰 **TAKE OFF ${money(Math.abs(Number(o.delta)), o.currency)}** (reduced by the player)\n` +
           loaderIdentity(o), [row]);
     }
-    return void (await reply(`✅ Reduced — we'll take off **${money(Number(j.new_amount ?? 0))}** instead. Your line stays.`));
+    return void (await reply(`✅ Reduced — we'll take off **${money(Number(j.new_amount ?? 0))}** instead. Your spot in line stays.`));
   }
   await reply(
     `✅ Cancellation requested. An admin will re-load **${money(Number(j.cancelled))}** back onto your table — ` +
