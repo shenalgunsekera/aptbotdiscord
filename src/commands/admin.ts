@@ -183,27 +183,55 @@ export async function withdrawPay(i: ButtonInteraction, withdrawId: string): Pro
   const s = ses(i.user.id);
   s.pending = 'pay_receipt';
   s.payWithdrawId = withdrawId;
-  await i.reply({ ephemeral: true, content: '📸 Post a **screenshot** of the payment you sent here — the player gets it as their receipt.\n\n_No screenshot? Just type the transaction ID instead._' });
+  // Drop the "I paid it" button so it can't be tapped twice; the card is rewritten
+  // to its finished state once the payment is recorded.
+  await i.update({ content: `${i.message.content}\n\n⏳ _Waiting for ${i.user.username} to post the receipt…_`, components: [] });
+  await i.followUp({ ephemeral: true, content: '📸 Post a **screenshot** of the payment you sent here — the player gets it as their receipt.\n\n_No screenshot? Just type the transaction ID instead._' });
 }
 
 /** The admin's next message after "I paid it": an image (receipt, forwarded to
- *  the player) or text (a plain reference). */
+ *  the player) or text (a plain reference). Rewrites the card to one finished
+ *  message and clears the admin's message so nothing stale is left. */
 export async function payReceipt(msg: Message): Promise<void> {
   const s = ses(msg.author.id);
   const withdrawId = s.payWithdrawId;
   const a = await currentAdmin(msg.author.id);
   const img = msg.attachments.find((at) => (at.contentType ?? '').startsWith('image/')) ?? msg.attachments.first();
-  const url = img?.url ?? null;
   const text = msg.content.trim();
-  if (!url && !text) return void (await msg.reply('Post a screenshot of the payment, or type the transaction ID.'));
+  if (!img && !text) return void (await msg.reply('Post a screenshot of the payment, or type the transaction ID.'));
   s.pending = undefined;
   s.payWithdrawId = undefined;
   if (!withdrawId || !a) return;
+
+  // A screenshot → copy it into permanent storage (Discord CDN links expire) so the
+  // receipt stays viewable + clickable in the player's history. Falls back to the CDN url.
+  let receiptUrl: string | null = null;
+  if (img) {
+    receiptUrl = img.url;
+    if (storageConfigured()) {
+      try {
+        const res = await fetch(img.url);
+        const stored = await uploadReceipt(Buffer.from(await res.arrayBuffer()), img.contentType ?? 'image/jpeg', 'fill', withdrawId);
+        receiptUrl = stored.url;
+      } catch { /* fall back to the CDN url */ }
+    }
+  }
+
+  let paid: { amount: number; currency: string } | undefined;
   try {
-    await mutate(async (sql) => await sql`select withdraw_club_payout(${withdrawId}::uuid, ${a.id}::uuid, null,
-                                          ${url ? null : text}, 'paid via discord', ${url})`);
+    [paid] = await mutate(async (sql) => sql<{ amount: number; currency: string }[]>`
+      select amount, currency from withdraw_club_payout(${withdrawId}::uuid, ${a.id}::uuid, null,
+                                          ${img ? null : text}, 'paid via discord', ${receiptUrl})`);
   } catch (e) { return void (await fail2(msg, e)); }
-  await msg.reply(url ? '✅ Recorded as paid — the receipt was sent to the player.' : `✅ Recorded as paid (ref \`${text}\`). The player has been told.`);
+
+  const [wr] = await db()<{ name: string | null }[]>`
+    select pl.display_name as name from withdraw_requests w
+      join players pl on pl.id = w.player_id where w.id = ${withdrawId}`;
+  const ref = img ? '' : ` (ref \`${text}\`)`;
+  const doneText = `✅ **Cash-out paid** — ${money(paid!.amount, paid!.currency)} to **${wr?.name ?? 'the player'}** · by ${msg.author.username}${ref}`;
+  const edited = await editDiscordCard(msg.client, 'withdraw_request', withdrawId, doneText, [], 'withdraw.needs_payout').catch(() => false);
+  if (edited) await msg.delete().catch(() => { /* needs Manage Messages */ });
+  else await msg.reply(doneText).catch(() => { /* leave one confirmation */ });
 }
 
 /** Sportsbook account created. */
