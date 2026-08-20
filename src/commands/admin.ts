@@ -24,6 +24,28 @@ async function fail2(msg: Message, e: unknown): Promise<void> {
 }
 const done = (i: ButtonInteraction, text: string) => i.update({ content: text, components: [] });
 
+/**
+ * The identity block on EVERY loader card — the platform ACCOUNT name (ClubGG
+ * username / Sportsbook username, never a bare numeric id), a [platform] tag, and
+ * the club. Matches the fresh loader.work card in notifier.ts, so a claimed /
+ * advanced card never drops back to just the display name. Callers select these
+ * columns with loaderIdSelect() + loaderIdJoins().
+ */
+export type LoaderId = { account: string; platform: string | null; platform_uid: string; club: string | null };
+export function loaderIdentity(o: LoaderId): string {
+  const who = `${o.account}${o.platform ? ` [${o.platform}]` : ''}`;
+  return `Player: **${who}** \`${o.platform_uid}\`${o.club ? ` · ${o.club}` : ''}`;
+}
+export function loaderIdSelect() {
+  return db()`coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, o.player_name) as account,
+              pf.name as platform, cl.name as club, o.platform_uid`;
+}
+export function loaderIdJoins() {
+  return db()`left join platforms pf on pf.id = o.platform_id
+              left join player_platforms pp on pp.player_id = o.player_id and pp.platform_id = o.platform_id
+              left join clubs cl on cl.id = o.club_id`;
+}
+
 /** Approve a player — links every platform they've claimed. */
 export async function approve(i: ButtonInteraction, ppId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
@@ -53,9 +75,10 @@ export async function verify(i: ButtonInteraction, fillId: string): Promise<void
 /** Turn the verify card into the loader "ADD" step (or a done/closed summary).
  *  Safe whether we just released the fill or found it already released. */
 async function advanceLoaderCard(i: ButtonInteraction, adminId: string, fillId: string): Promise<void> {
-  const [o] = await db()<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string; status: string }[]>`
-    select id, delta, currency, player_name, platform_uid, status from loader_orders
-     where ref_type='fill' and ref_id=${fillId} order by created_at desc limit 1`;
+  const [o] = await db()<{ id: string; delta: number; currency: string; account: string; platform: string | null; platform_uid: string; club: string | null; status: string }[]>`
+    select o.id, o.delta, o.currency, o.status, ${loaderIdSelect()}
+      from loader_orders o ${loaderIdJoins()}
+     where o.ref_type='fill' and o.ref_id=${fillId} order by o.created_at desc limit 1`;
   if (!o) return void (await i.update({ content: `✅ **Verified & released** · by ${i.user.username}`, components: [], embeds: [] }));
   if (o.status === 'done') return void (await i.update({ content: `✅ **Verified & loaded** — ${money(o.delta, o.currency)} added to their table.`, components: [], embeds: [] }));
   if (o.status === 'cancelled' || o.status === 'failed') return void (await i.update({ content: `✅ **Verified** — loading was ${o.status}.`, components: [], embeds: [] }));
@@ -69,7 +92,7 @@ async function advanceLoaderCard(i: ButtonInteraction, adminId: string, fillId: 
     new ButtonBuilder().setCustomId(`lo:done:${o.id}:${o.delta}`).setLabel(`✅ Done — added ${money(o.delta, o.currency)}`).setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`lo:fail:${o.id}`).setLabel('❌ Failed').setStyle(ButtonStyle.Danger),
   );
-  await i.update({ content: `🎰 **ADD ${money(o.delta, o.currency)}** to their table — Player: **${o.player_name}** \`${o.platform_uid}\`\n_Claimed by ${i.user.username}._ Add it, then:`, components: [r] });
+  await i.update({ content: `🎰 **ADD ${money(o.delta, o.currency)}** to their table — ${loaderIdentity(o)}\n_Claimed by ${i.user.username}._ Add it, then:`, components: [r] });
 }
 
 /** 🗑 Discard — payment didn't land: silent reject, no credit, slice returns. */
@@ -94,9 +117,12 @@ export async function loaderClaim(i: ButtonInteraction, orderId: string): Promis
 /** Render a loader order's current step: the Done/Failed action (with who claimed
  *  it) while pending/claimed, or a done/closed summary. Self-heals a stale card. */
 async function showLoaderStep(i: ButtonInteraction, orderId: string): Promise<void> {
-  const [o] = await db()<{ delta: number; currency: string; player_name: string; platform_uid: string; status: string; claimer: string | null }[]>`
-    select o.delta, o.currency, o.player_name, o.platform_uid, o.status, a.display_name as claimer
-      from loader_orders o left join admins a on a.id = o.claimed_by where o.id = ${orderId}`;
+  const [o] = await db()<{ delta: number; currency: string; account: string; platform: string | null; platform_uid: string; club: string | null; status: string; claimer: string | null }[]>`
+    select o.delta, o.currency, o.status, a.display_name as claimer, ${loaderIdSelect()}
+      from loader_orders o
+      left join admins a on a.id = o.claimed_by
+      ${loaderIdJoins()}
+     where o.id = ${orderId}`;
   if (!o) return void (await i.update({ content: '↩️ That task no longer exists.', components: [], embeds: [] }));
   const load = o.delta > 0;
   if (o.status === 'done') return void (await i.update({ content: `✅ **Done** — ${money(Math.abs(o.delta), o.currency)} ${load ? 'added' : 'taken off'}.`, components: [], embeds: [] }));
@@ -107,7 +133,7 @@ async function showLoaderStep(i: ButtonInteraction, orderId: string): Promise<vo
   if (!load) r.addComponents(new ButtonBuilder().setCustomId(`lo:short:${orderId}`).setLabel('✏️ Different amount').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`lo:done:${orderId}:0`).setLabel('❌ Nothing there').setStyle(ButtonStyle.Secondary));
   else r.addComponents(new ButtonBuilder().setCustomId(`lo:fail:${orderId}`).setLabel('❌ Failed').setStyle(ButtonStyle.Danger));
   const by = o.claimer ? `_Claimed by ${o.claimer}._` : '';
-  await i.update({ content: `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}** — Player: **${o.player_name}** \`${o.platform_uid}\`\n${by} Tap the amount you actually ${load ? 'added' : 'took off'}:`, components: [r] });
+  await i.update({ content: `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}** — ${loaderIdentity(o)}\n${by} Tap the amount you actually ${load ? 'added' : 'took off'}:`, components: [r] });
 }
 
 export async function loaderDone(i: ButtonInteraction, orderId: string, delta: number): Promise<void> {

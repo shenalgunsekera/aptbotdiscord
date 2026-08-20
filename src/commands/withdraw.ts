@@ -8,6 +8,7 @@ import { ses } from '../session.js';
 import { money, whole, parseAmount, amountProblem, withdrawHandlePrompt, cashoutConfirm } from '../words.js';
 import { confirmedPlatforms, payoutMethods, methodOption, say, sayChat, sendChannel, selectRow } from '../flows.js';
 import { editDiscordCard } from '../notifier.js';
+import { loaderIdentity, loaderIdSelect, loaderIdJoins } from './admin.js';
 import type { PaymentMethod, WithdrawRequest } from '../core/index.js';
 
 /** /withdraw — cash-out. platform → club → amount(chat) → method → handle(chat) → queue. */
@@ -220,14 +221,14 @@ async function doCancel(ctx: ButtonInteraction | Message, withdrawId: string, am
     return void (await reply('✅ Your cash-out was cancelled. Nothing was taken off your table.'));
   }
   if (j.scenario === 'pending_partial') {
-    const [o] = await db()<{ delta: number; currency: string; player_name: string; platform_uid: string }[]>`
-      select delta, currency, player_name, platform_uid from loader_orders where id = ${j.order_id}`;
+    const [o] = await db()<{ delta: number; currency: string; account: string; platform: string | null; platform_uid: string; club: string | null }[]>`
+      select o.delta, o.currency, ${loaderIdSelect()} from loader_orders o ${loaderIdJoins()} where o.id = ${j.order_id}`;
     if (o) {
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(`lo:claim:${j.order_id}`).setLabel('✋ Claim').setStyle(ButtonStyle.Primary));
       await editDiscordCard(client, 'loader_order', j.order_id,
         `🎰 **TAKE OFF ${money(Math.abs(Number(o.delta)), o.currency)}** (reduced by the player)\n` +
-          `Player: **${o.player_name}**\nID: \`${o.platform_uid}\``, [row]);
+          loaderIdentity(o), [row]);
     }
     return void (await reply(`✅ Reduced — we'll take off **${money(Number(j.new_amount ?? 0))}** instead. Your line stays.`));
   }
