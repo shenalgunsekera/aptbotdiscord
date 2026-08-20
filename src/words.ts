@@ -84,21 +84,22 @@ export function receiptInstruction(code: string): string {
   }
 }
 
-export function cashoutConfirm(code: string, methodName: string, handle: string, amount: string, clubHandle?: string | null, settlement?: string): string {
+export function cashoutConfirm(code: string, methodName: string, handle: string, amount: string, clubHandle?: string | null, settlement?: string, payoutMode?: string | null): string {
   // Peer-to-peer methods (Venmo/Zelle, and Cash App/PayPal when toggled to P2P):
   // the player's tag joins the queue and a depositor pays them directly.
   if (settlement === 'p2p') {
     return `✅ **Cash-out started!**\n\nYour ${methodName} \`${handle}\` has been added to the queue. You'll receive **${amount}** within 24 hours.`;
   }
-  const club = clubHandle ? '`' + clubHandle + '`' : 'our account';
-  const copy = clubHandle ? ' _(tap to copy)_' : '';
-  switch (code) {
-    case 'cashapp':
-    case 'paypal':
-      return `✅ **Cash-out started!**\n\nPlease request **${amount}** from ${club}${copy} on ${methodName}. Your request will be fulfilled in less than 24 hours.`;
-    default:
-      return `✅ **Cash-out started!**\n\nYour ${methodName} \`${handle}\` has been added to the queue. You'll receive **${amount}** within 24 hours.`;
+  // Company-settled: the payout style follows the method's setting. 'request' → the
+  // player requests from the club account; 'admin_paid' → an admin sends it to the
+  // player's handle. Unset → the old name-based default (Cash App/PayPal request).
+  const requestMode = payoutMode ? payoutMode === 'request' : (code === 'cashapp' || code === 'paypal');
+  if (requestMode) {
+    const club = clubHandle ? '`' + clubHandle + '`' : 'our account';
+    const copy = clubHandle ? ' _(tap to copy)_' : '';
+    return `✅ **Cash-out started!**\n\nPlease request **${amount}** from ${club}${copy} on ${methodName}. Your request will be fulfilled in less than 24 hours.`;
   }
+  return `✅ **Cash-out started!**\n\nYour ${methodName} \`${handle}\` has been added to the queue. You'll receive **${amount}** within 24 hours.`;
 }
 
 /** The payment window, worded from the configured match timeout (seconds). */
