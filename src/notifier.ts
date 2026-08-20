@@ -264,8 +264,12 @@ export function render(n: Notification): Rendered | null {
       // shows, so an admin can tie the payout to the right player at a glance.
       const acct = p.account ? `Account: **${p.account}**${p.platform ? ` [${p.platform}]` : ''}\n` : '';
       const club = p.club ? `Club: ${p.club}\n` : '';
-      return String(p.method).toLowerCase().includes('paypal')
-        ? { content: `💸 **PayPal cash-out — approve a request**\nFrom: **${p.name}**\n${acct}${club}Amount: **${m(p.amount, p.currency)}**\nApprove & pay their money request, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) }
+      // How the admin settles it — set per method in the panel (company-settled
+      // only). Unset → the old name-based default (PayPal = request, else admin-pays).
+      const requestFlow = p.payout_mode ? p.payout_mode === 'request'
+        : String(p.method).toLowerCase().includes('paypal');
+      return requestFlow
+        ? { content: `💸 **${p.method} cash-out — approve a request**\nFrom: **${p.name}**\n${acct}${club}Amount: **${m(p.amount, p.currency)}**\nApprove & pay their money request, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) }
         : { content: (p.small ? `🔹 **Small cash-out — pay it directly.** Under the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n` : '') + `💸 **Cash-out to pay** (${p.method})\n${p.name ? 'To: **' + p.name + '**\n' : ''}${acct}${club}Amount: **${m(p.amount, p.currency)}**\nSend to: \`${p.handle}\` _(tap to copy)_\nPay it, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) };
     }
     case 'crypto.detection_down':
