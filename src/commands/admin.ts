@@ -33,8 +33,9 @@ const done = (i: ButtonInteraction, text: string) => i.update({ content: text, c
  */
 export type LoaderId = { account: string; platform: string | null; platform_uid: string; club: string | null };
 export function loaderIdentity(o: LoaderId): string {
-  const who = `${o.account}${o.platform ? ` [${o.platform}]` : ''}`;
-  return `Player: **${who}** \`${o.platform_uid}\`${o.club ? ` · ${o.club}` : ''}`;
+  // Match the verify card: account, then [platform · club] together in the bracket.
+  const tag = o.platform ? ` [${o.platform}${o.club ? ` · ${o.club}` : ''}]` : '';
+  return `Player: **${o.account}**${tag} \`${o.platform_uid}\``;
 }
 export function loaderIdSelect() {
   return db()`coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, o.player_name) as account,
