@@ -257,10 +257,15 @@ export function render(n: Notification): Rendered | null {
         content: `🆕 **Create a Sportsbook account**\nFor: **${p.name}**\nUsername: \`${p.username}\`\nPassword: \`${p.password}\`\nCreate it, then tap below.`,
         components: row(btn('✅ Account created', `sb:made:${p.player_id}`)),
       };
-    case 'withdraw.needs_payout':
+    case 'withdraw.needs_payout': {
+      // Who to pay, on the platform they play — same account/club the loader card
+      // shows, so an admin can tie the payout to the right player at a glance.
+      const acct = p.account ? `Account: **${p.account}**${p.platform ? ` [${p.platform}]` : ''}\n` : '';
+      const club = p.club ? `Club: ${p.club}\n` : '';
       return String(p.method).toLowerCase().includes('paypal')
-        ? { content: `💸 **PayPal cash-out — approve a request**\nFrom: **${p.name}**\nAmount: **${m(p.amount, p.currency)}**\nApprove & pay their money request, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) }
-        : { content: (p.small ? `🔹 **Small cash-out — pay it directly.** Under the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n` : '') + `💸 **Cash-out to pay** (${p.method})\n${p.name ? 'To: **' + p.name + '**\n' : ''}Amount: **${m(p.amount, p.currency)}**\nSend to: \`${p.handle}\` _(tap to copy)_\nPay it, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) };
+        ? { content: `💸 **PayPal cash-out — approve a request**\nFrom: **${p.name}**\n${acct}${club}Amount: **${m(p.amount, p.currency)}**\nApprove & pay their money request, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) }
+        : { content: (p.small ? `🔹 **Small cash-out — pay it directly.** Under the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n` : '') + `💸 **Cash-out to pay** (${p.method})\n${p.name ? 'To: **' + p.name + '**\n' : ''}${acct}${club}Amount: **${m(p.amount, p.currency)}**\nSend to: \`${p.handle}\` _(tap to copy)_\nPay it, then tap below.`, components: row(btn('✅ I paid it', `wd:pay:${p.withdraw_id}`)) };
+    }
     case 'crypto.detection_down':
       return { content: `🚨 **Crypto auto-detection is OFF** for: ${(Array.isArray(p.methods) ? p.methods : []).join(', ') || 'some coins'}.\n` +
         `The chain API key (\`ETHERSCAN_API_KEY\`) isn't set, so incoming USDC / USDT / ETH won't be picked up automatically. ` +
