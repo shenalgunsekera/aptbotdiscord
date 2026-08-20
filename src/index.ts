@@ -86,7 +86,8 @@ async function onSlash(i: any): Promise<void> {
     case 'cancelwithdraw': return void (await withdraw.cancelWithdraw(i));
     case 'addtowithdraw': return void (await withdraw.addToWithdraw(i));
     case 'pending': return void (await reads.pending(i));
-    case 'payments': return void (await reads.payments(i));
+    case 'withdrawalhistory': return void (await reads.withdrawalHistory(i));
+    case 'deposithistory': return void (await reads.depositHistory(i));
     case 'guide': return void (await reads.guide(i));
     case 'support': return void (await reads.support(i));
     case 'stop': return void (await reads.stop(i));
