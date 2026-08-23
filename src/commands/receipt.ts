@@ -33,15 +33,30 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
     return;
   }
 
-  // Deposit receipt: session fill, else the player's latest locked fill.
+  // Deposit receipt: session fill, else the player's latest pending fill. Include
+  // 'awaiting_confirmation' (recent) so a SECOND screenshot sent as a separate
+  // message still attaches — the first one already moved the fill off 'locked'.
   let fillId = s.addFillId;
   if (!fillId) {
     const [f] = await db()<{ id: string }[]>`
       select fl.id from fills fl join deposit_requests d on d.id = fl.deposit_id
-       where d.player_id = ${p.id} and fl.status = 'locked' order by fl.created_at desc limit 1`;
+       where d.player_id = ${p.id} and fl.status in ('locked', 'awaiting_confirmation')
+         and fl.created_at > now() - interval '2 hours'
+       order by fl.created_at desc limit 1`;
     fillId = f?.id;
   }
   if (!fillId) return;   // no pending deposit — ignore stray images
+
+  // Cap at two receipts per deposit, counting any already stored (a first message).
+  const [pre] = await db()<{ n: number }[]>`
+    select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
+  const already = pre?.n ?? 0;
+  if (already >= 2) {
+    clearSes(msg.author.id);
+    await msg.reply('✅ Got your two screenshots already.');
+    return;
+  }
+  const take = atts.slice(0, 2 - already);
 
   try {
     const [f] = await db()<{ deposit_id: string | null }[]>`select deposit_id from fills where id = ${fillId}`;
@@ -53,7 +68,7 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
     // here leaves nothing half-written and the player can simply resend. Then
     // one transaction records all receipts, submits proof, and posts the card.
     const stored: { storagePath: string; url: string; bytes: number | null; ct: string }[] = [];
-    for (const a of atts) {
+    for (const a of take) {
       const ct = a.contentType ?? 'image/jpeg';
       let storagePath = a.url, url = a.url, bytes: number | null = a.size ?? null;
       if (storageConfigured()) {
@@ -72,23 +87,27 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
       }
       const locked = await sql<{ id: string }[]>`select id from fills where deposit_id = ${f!.deposit_id} and status = 'locked' order by seq`;
       for (const lf of locked) await sql`select fill_submit_proof(${lf.id}::uuid, null, null, false)`;
-      // Send the receipt(s) to the admin channel for verification, as one card.
-      const [info] = await sql<{ amount: number; currency: string; method: string; name: string | null; payout_handle: string | null; payout_name: string | null; from_name: string | null; platform: string | null; club: string | null }[]>`
-        select f.amount, f.currency, pm.name method, dp.display_name name, f.payout_handle, f.payout_name,
-               pf.name as platform, c.name as club,
-               coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, dp.display_name) as from_name
-          from fills f join payment_methods pm on pm.id = f.method_id
-          left join deposit_requests d on d.id = f.deposit_id
-          left join players dp on dp.id = d.player_id
-          left join platforms pf on pf.id = d.platform_id
-          left join player_platforms pp on pp.player_id = d.player_id and pp.platform_id = d.platform_id
-          left join clubs c on c.id = pp.club_id
-         where f.id = ${fillId}`;
-      await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json({
-        fill_id: fillId, urls, amount: info?.amount, currency: info?.currency, method: info?.method, name: info?.name,
-        from_name: info?.from_name ?? info?.name, platform: info?.platform, club: info?.club,
-        payout_handle: info?.payout_handle, payout_name: info?.payout_name,
-      }) as any}::jsonb)`;
+      // Send the receipt(s) to the admin channel ONCE — on the first batch. A
+      // second, separately-sent screenshot is still stored above; it just doesn't
+      // raise a duplicate card (admins already have one for this deposit).
+      if (already === 0) {
+        const [info] = await sql<{ amount: number; currency: string; method: string; name: string | null; payout_handle: string | null; payout_name: string | null; from_name: string | null; platform: string | null; club: string | null }[]>`
+          select f.amount, f.currency, pm.name method, dp.display_name name, f.payout_handle, f.payout_name,
+                 pf.name as platform, c.name as club,
+                 coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, dp.display_name) as from_name
+            from fills f join payment_methods pm on pm.id = f.method_id
+            left join deposit_requests d on d.id = f.deposit_id
+            left join players dp on dp.id = d.player_id
+            left join platforms pf on pf.id = d.platform_id
+            left join player_platforms pp on pp.player_id = d.player_id and pp.platform_id = d.platform_id
+            left join clubs c on c.id = pp.club_id
+           where f.id = ${fillId}`;
+        await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json({
+          fill_id: fillId, urls, amount: info?.amount, currency: info?.currency, method: info?.method, name: info?.name,
+          from_name: info?.from_name ?? info?.name, platform: info?.platform, club: info?.club,
+          payout_handle: info?.payout_handle, payout_name: info?.payout_name,
+        }) as any}::jsonb)`;
+      }
     });
   } catch (e) {
     if (isUserError(e)) { await msg.reply(`❌ ${userMessage(e)}`); return; }
@@ -97,7 +116,9 @@ export async function onReceiptMessage(msg: Message): Promise<void> {
     return;
   }
   clearSes(msg.author.id);
-  await msg.reply(`✅ **Got your ${atts.length > 1 ? 'receipts' : 'receipt'}!** We'll check your payment and add your money — you'll get a message here the moment it's done.`);
+  await msg.reply(already > 0
+    ? '✅ **Got your second screenshot too.**'
+    : `✅ **Got your ${take.length > 1 ? 'receipts' : 'receipt'}!** We'll check your payment and add your money — you'll get a message here the moment it's done.`);
 }
 
 async function handleStripe(msg: Message, attUrl: string, playerId: string, platformId: string, ct: string, amount?: number): Promise<void> {
