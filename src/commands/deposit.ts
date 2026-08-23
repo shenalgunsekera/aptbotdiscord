@@ -87,7 +87,11 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
   const s = ses(msg.author.id);
   if (!p || !s.addPlatform || !s.addMethod) return;
   const amount = parseAmount(text);
-  const cfg = (await db()<{ min_amount: number; max_amount: number; amount_step: number }[]>`select min_amount, max_amount, amount_step from config where id`)[0]!;
+  // Per-method min/max (method is known here), falling back to the global.
+  const cfg = (await db()<{ min_amount: number; max_amount: number; amount_step: number }[]>`
+    select coalesce(m.min_amount, c.min_amount) as min_amount,
+           coalesce(m.max_amount, c.max_amount) as max_amount, c.amount_step
+      from config c cross join payment_methods m where m.id = ${s.addMethod}`)[0]!;
   if (amount === null) return void (await msg.reply('That doesn\'t look like an amount. Try `20` or `50`.'));
   const problem = amountProblem(amount, { min: cfg.min_amount, max: cfg.max_amount, step: cfg.amount_step });
   if (problem) return void (await msg.reply(problem));
