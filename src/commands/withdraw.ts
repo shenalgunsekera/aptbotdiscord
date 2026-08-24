@@ -61,7 +61,7 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
   // enabled payout methods; withdraw_create enforces the chosen method's exact min.
   const cfg = (await db()<{ min_amount: number; max_amount: number; amount_step: number }[]>`
     select c.amount_step,
-      coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount) as min_amount,
+      greatest(coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount), c.min_amount) as min_amount,
       coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
       from config c`)[0]!;
   if (amount === null) return void (await msg.reply('That doesn\'t look like an amount. Try `50`.'));
