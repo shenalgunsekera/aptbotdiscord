@@ -1,4 +1,5 @@
 import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { pathToFileURL } from 'node:url';
 import { CONFIG } from './config.js';
 
 /**
@@ -41,9 +42,22 @@ export async function registerCommands(): Promise<void> {
   const rest = new REST({ version: '10' }).setToken(CONFIG.token);
   if (CONFIG.guildId) {
     await rest.put(Routes.applicationGuildCommands(CONFIG.appId, CONFIG.guildId), { body: COMMANDS });
-    console.log(`[discord] registered ${COMMANDS.length} guild commands`);
+    // Clear any GLOBAL copies. If the bot ever ran without DISCORD_GUILD_ID it
+    // registered these commands globally too, and Discord then shows every one
+    // twice — merging the option lists so /adjust sprouts duplicate `amount`
+    // fields. Wiping the global scope leaves exactly one command per name.
+    await rest.put(Routes.applicationCommands(CONFIG.appId), { body: [] }).catch(() => { /* nothing to clear */ });
+    console.log(`[discord] registered ${COMMANDS.length} guild commands (cleared global scope)`);
   } else {
     await rest.put(Routes.applicationCommands(CONFIG.appId), { body: COMMANDS });
     console.log(`[discord] registered ${COMMANDS.length} global commands`);
   }
+}
+
+// `pnpm register` runs this file directly — actually (re)register when it does,
+// so the duplicate-command fix can be applied without a full redeploy.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  registerCommands()
+    .then(() => process.exit(0))
+    .catch((e) => { console.error('[discord] registration failed:', e); process.exit(1); });
 }
