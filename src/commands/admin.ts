@@ -3,7 +3,7 @@ import {
   type ButtonInteraction, type ModalSubmitInteraction, type ChatInputCommandInteraction, type Message,
 } from 'discord.js';
 import { db, mutate, isUserError, userMessage } from '../db.js';
-import { uploadReceipt, storageConfigured } from '../core/index.js';
+import { uploadReceipt, storageConfigured, platformTotals } from '../core/index.js';
 import { currentAdmin } from '../identity.js';
 import { ses } from '../session.js';
 import { money } from '../words.js';
@@ -289,6 +289,24 @@ async function ticketTarget(i: ChatInputCommandInteraction): Promise<{ id: strin
      order by created_at desc limit 1`;
   if (!w) { await i.reply({ ephemeral: true, content: `${pl.display_name ?? 'This player'} has no cash-out in progress.` }); return null; }
   return { id: pl.id, name: pl.display_name ?? 'this player', withdrawId: w.id };
+}
+
+/** /totals — money in / out per platform (ClubGG, Sportsbook, …), all-time. */
+export async function totalsCmd(i: ChatInputCommandInteraction): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const rows = await platformTotals();
+  if (rows.length === 0) return void (await i.reply({ ephemeral: true, content: 'No platforms set up yet.' }));
+  let din = 0, dout = 0;
+  const lines = rows.map((t) => {
+    din += Number(t.deposited); dout += Number(t.withdrawn);
+    const net = Number(t.deposited) - Number(t.withdrawn);
+    return `**${t.name}**\n⬇︎ Deposited in: ${money(Number(t.deposited))} · ⬆︎ Cashed out: ${money(Number(t.withdrawn))} · ⚖︎ Net: ${money(net)}`;
+  });
+  await i.reply({
+    ephemeral: true,
+    content: `📊 **Totals by platform** (all-time)\n\n${lines.join('\n\n')}\n\n————\n**All platforms** — in ${money(din)} · out ${money(dout)} · net ${money(din - dout)}`,
+  });
 }
 
 export async function pauseWithdraw(i: ChatInputCommandInteraction): Promise<void> {

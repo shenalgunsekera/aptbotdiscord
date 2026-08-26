@@ -36,6 +36,7 @@ export const COMMANDS = [
     .addUserOption((o) => o.setName('user').setDescription('Who to make an admin').setRequired(true))
     .addStringOption((o) => o.setName('email').setDescription('Their email — how they sign in to the website').setRequired(true))
     .addBooleanOption((o) => o.setName('owner').setDescription('Make them an owner instead of an admin')),
+  new SlashCommandBuilder().setName('totals').setDescription('(admin) Deposited & cashed-out totals per platform'),
 ].map((c) => c.toJSON());
 
 export async function registerCommands(): Promise<void> {
