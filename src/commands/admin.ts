@@ -340,10 +340,11 @@ export async function reversePayment(i: ChatInputCommandInteraction): Promise<vo
   if (!pl) return void (await i.reply({ ephemeral: true, content: "No player is linked to this channel, so there's nothing to reverse here." }));
   // List the recent SENT payments so the admin picks the fake one — it may not be
   // the most recent (could be the 2nd or 3rd back).
+  const n = Math.min(20, Math.max(1, i.options.getInteger('count') ?? 10));
   const fills = await db()<{ id: string; amount: number; released_at: string | null }[]>`
     select f.id, f.amount, f.released_at from fills f join withdraw_requests w on w.id = f.withdraw_id
      where w.player_id = ${pl.id} and f.status = 'released'
-     order by f.released_at desc nulls last, f.created_at desc limit 10`;
+     order by f.released_at desc nulls last, f.created_at desc limit ${n}`;
   if (fills.length === 0) return void (await i.reply({ ephemeral: true, content: `${pl.display_name ?? 'This player'} has no sent payment to reverse.` }));
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   let row = new ActionRowBuilder<ButtonBuilder>();
