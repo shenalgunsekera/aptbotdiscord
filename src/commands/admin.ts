@@ -338,16 +338,35 @@ export async function reversePayment(i: ChatInputCommandInteraction): Promise<vo
     select p.id, p.display_name from players p join discord_players dp on dp.player_id = p.id
      where dp.ticket_channel_id = ${i.channelId}`;
   if (!pl) return void (await i.reply({ ephemeral: true, content: "No player is linked to this channel, so there's nothing to reverse here." }));
-  const [f] = await db()<{ id: string; amount: number }[]>`
-    select f.id, f.amount from fills f join withdraw_requests w on w.id = f.withdraw_id
+  // List the recent SENT payments so the admin picks the fake one — it may not be
+  // the most recent (could be the 2nd or 3rd back).
+  const fills = await db()<{ id: string; amount: number; released_at: string | null }[]>`
+    select f.id, f.amount, f.released_at from fills f join withdraw_requests w on w.id = f.withdraw_id
      where w.player_id = ${pl.id} and f.status = 'released'
-     order by f.released_at desc nulls last, f.created_at desc limit 1`;
-  if (!f) return void (await i.reply({ ephemeral: true, content: `${pl.display_name ?? 'This player'} has no sent payment to reverse.` }));
-  try { await mutate(async (sql) => await sql`select fill_reverse(${f.id}::uuid, ${a.id}::uuid, 'admin reversal')`); }
+     order by f.released_at desc nulls last, f.created_at desc limit 10`;
+  if (fills.length === 0) return void (await i.reply({ ephemeral: true, content: `${pl.display_name ?? 'This player'} has no sent payment to reverse.` }));
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  let row = new ActionRowBuilder<ButtonBuilder>();
+  fills.forEach((f, idx) => {
+    if (idx > 0 && idx % 5 === 0) { rows.push(row); row = new ActionRowBuilder<ButtonBuilder>(); }
+    const day = f.released_at ? ' · ' + new Date(f.released_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    row.addComponents(new ButtonBuilder().setCustomId(`rvp:${f.id}`).setLabel(`↩️ ${money(f.amount)}${day}`.slice(0, 80)).setStyle(ButtonStyle.Secondary));
+  });
+  rows.push(row);
+  await i.reply({ ephemeral: true, content: `Which payment to **${pl.display_name ?? 'this player'}** should I reverse? Tap the fake one:`, components: rows.slice(0, 5) });
+}
+
+/** The admin tapped a specific payment to reverse (button rvp:<fill_id>). */
+export async function reversePaymentPick(i: ButtonInteraction, fillId: string): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const [pre] = await db()<{ amount: number }[]>`select amount from fills where id = ${fillId}`;
+  try { await mutate(async (sql) => await sql`select fill_reverse(${fillId}::uuid, ${a.id}::uuid, 'admin reversal')`); }
   catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
-  const [w] = await db()<{ amount: number; amount_remaining: number }[]>`
-    select w.amount, w.amount_remaining from withdraw_requests w join fills f on f.withdraw_id = w.id where f.id = ${f.id}`;
-  await i.reply({ ephemeral: false, content: `↩️ Reversed the **${money(f.amount)}** payment to ${pl.display_name ?? 'this player'} — it's back on their cash-out (now ${money(w!.amount_remaining)}/${money(w!.amount)} to be sent). The club absorbed it; they've been told.` });
+  const [w] = await db()<{ amount: number; amount_remaining: number; name: string | null }[]>`
+    select w.amount, w.amount_remaining, p.display_name as name
+      from withdraw_requests w join fills fl on fl.withdraw_id = w.id join players p on p.id = w.player_id where fl.id = ${fillId}`;
+  await i.update({ content: `↩️ Reversed the **${money(pre?.amount ?? 0)}** payment to ${w?.name ?? 'the player'} — back on their cash-out (now ${money(w?.amount_remaining ?? 0)}/${money(w?.amount ?? 0)} to be sent). The club absorbed it; they've been told.`, components: [] });
 }
 
 /** /adjust amount:<±$> [receipt:<img>] — +grows the cash-out; − records a payment

@@ -149,6 +149,7 @@ async function onComponent(i: any): Promise<void> {
 
   // ── admin ──
   if (id.startsWith('pl:approve:')) return void (await admin.approve(i, arg));
+  if (id.startsWith('rvp:')) return void (await admin.reversePaymentPick(i, arg));
   if (id.startsWith('fl:verify:')) return void (await admin.verify(i, arg));
   if (id.startsWith('fv:verify:')) return void (await admin.verify(i, arg));
   if (id.startsWith('fv:discard:')) return void (await admin.discard(i, arg));
