@@ -327,6 +327,29 @@ export async function resumeWithdraw(i: ChatInputCommandInteraction): Promise<vo
   await i.reply({ ephemeral: false, content: `▶️ Resumed ${t.name}'s cash-out — it's back in the queue at its original place.` });
 }
 
+/** /reversepayment — a payment we already sent was fake. Un-sends it: the amount
+ *  goes back onto what the player is owed (total unchanged), re-opening the cash-
+ *  out even if this was the final payment. The club absorbs it. Targets the
+ *  player's most recent released payment (works even on a completed cash-out). */
+export async function reversePayment(i: ChatInputCommandInteraction): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const [pl] = await db()<{ id: string; display_name: string | null }[]>`
+    select p.id, p.display_name from players p join discord_players dp on dp.player_id = p.id
+     where dp.ticket_channel_id = ${i.channelId}`;
+  if (!pl) return void (await i.reply({ ephemeral: true, content: "No player is linked to this channel, so there's nothing to reverse here." }));
+  const [f] = await db()<{ id: string; amount: number }[]>`
+    select f.id, f.amount from fills f join withdraw_requests w on w.id = f.withdraw_id
+     where w.player_id = ${pl.id} and f.status = 'released'
+     order by f.released_at desc nulls last, f.created_at desc limit 1`;
+  if (!f) return void (await i.reply({ ephemeral: true, content: `${pl.display_name ?? 'This player'} has no sent payment to reverse.` }));
+  try { await mutate(async (sql) => await sql`select fill_reverse(${f.id}::uuid, ${a.id}::uuid, 'admin reversal')`); }
+  catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+  const [w] = await db()<{ amount: number; amount_remaining: number }[]>`
+    select w.amount, w.amount_remaining from withdraw_requests w join fills f on f.withdraw_id = w.id where f.id = ${f.id}`;
+  await i.reply({ ephemeral: false, content: `↩️ Reversed the **${money(f.amount)}** payment to ${pl.display_name ?? 'this player'} — it's back on their cash-out (now ${money(w!.amount_remaining)}/${money(w!.amount)} to be sent). The club absorbed it; they've been told.` });
+}
+
 /** /adjust amount:<±$> [receipt:<img>] — +grows the cash-out; − records a payment
  *  you made (receipt required). */
 export async function adjustCmd(i: ChatInputCommandInteraction): Promise<void> {

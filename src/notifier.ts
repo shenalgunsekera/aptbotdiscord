@@ -132,6 +132,9 @@ export function render(n: Notification): Rendered | null {
         ...(urls.length ? { embeds: imgEmbeds(urls) } : {}),
       };
     }
+    case 'fill.reversed':
+      return { content: `↩️ **A ${m(p.amount, p.currency)} payment on your cash-out was reversed** — it didn't clear, so it's back on your balance.` +
+        (Number(p.remaining) > 0 ? ` ${m(p.remaining, p.currency)}/${m(p.total, p.currency)} still to be sent.` : '') };
     case 'fill.lock_expired':
       return { content: `⏱ **Time's up on your ${m(p.amount, p.currency)} deposit.** No payment arrived in time, so it was cancelled. Start again with \`/deposit\` to try once more. If you already sent it, message us with \`/support\`.` };
     case 'deposit.discarded':

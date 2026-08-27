@@ -27,6 +27,7 @@ export const COMMANDS = [
   // Admin-only, run in a player's ticket channel to control their cash-out.
   new SlashCommandBuilder().setName('pausewithdraw').setDescription('(admin) Take this player\'s cash-out out of the queue'),
   new SlashCommandBuilder().setName('resumewithdraw').setDescription('(admin) Put this player\'s cash-out back in the queue'),
+  new SlashCommandBuilder().setName('reversepayment').setDescription('(admin) Undo a sent payment that turned out fake'),
   new SlashCommandBuilder().setName('adjust').setDescription('(admin) +amount grows the cash-out; -amount records a payment you made')
     .addNumberOption((o) => o.setName('amount').setDescription('e.g. 50 to add, or -50 to record a payment you made').setRequired(true))
     .addAttachmentOption((o) => o.setName('receipt').setDescription('Screenshot of the payment (required for a negative amount)')),

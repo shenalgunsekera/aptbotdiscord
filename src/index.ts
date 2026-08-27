@@ -99,6 +99,7 @@ async function onSlash(i: any): Promise<void> {
     case 'pausewithdraw': return void (await admin.pauseWithdraw(i));
     case 'resumewithdraw': return void (await admin.resumeWithdraw(i));
     case 'adjust': return void (await admin.adjustCmd(i));
+    case 'reversepayment': return void (await admin.reversePayment(i));
     case 'paymentchannel': return void (await admin.setChannel(i, 'payments'));
     case 'adminchannel': return void (await admin.setChannel(i, 'admin'));
     case 'setadmin': return void (await admin.setAdmin(i));
