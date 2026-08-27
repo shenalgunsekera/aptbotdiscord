@@ -120,9 +120,15 @@ export function render(n: Notification): Rendered | null {
       // Show the payee the proof they were paid: the screenshot(s) the payer
       // uploaded. Discord renders public image urls (a telegram file_id can't be).
       const urls: string[] = (Array.isArray(p.urls) ? p.urls : []).filter((u: string) => u && String(u).startsWith('http'));
+      // total = whole cash-out, remaining = still to be sent (0102 payload); older
+      // outbox rows lack them → fall back to the previous wording.
+      const head = p.total != null && p.remaining != null
+        ? (Number(p.remaining) > 0
+            ? `✅ **${m(p.amount, p.currency)} has been sent.** ${m(p.remaining, p.currency)}/${m(p.total, p.currency)} to be sent.`
+            : `✅ **${m(p.amount, p.currency)} has been sent — your cash-out is complete.** 🎉`)
+        : `✅ **${m(p.amount, p.currency)} — that part of your cash-out is done.**`;
       return {
-        content: `✅ **${m(p.amount, p.currency)} — that part of your cash-out is done.**` +
-          (urls.length ? `\nHere ${urls.length > 1 ? 'are the screenshots' : 'is the screenshot'} of your payment.` : ''),
+        content: head + (urls.length ? `\nHere ${urls.length > 1 ? 'are the screenshots' : 'is the screenshot'} of your payment.` : ''),
         ...(urls.length ? { embeds: imgEmbeds(urls) } : {}),
       };
     }
