@@ -60,7 +60,7 @@ export async function onAmountText(msg: Message, text: string): Promise<void> {
   // The payout method is chosen after the amount, so use the widest range across
   // enabled payout methods; withdraw_create enforces the chosen method's exact min.
   const cfg = (await db()<{ min_amount: number; max_amount: number; amount_step: number }[]>`
-    select c.amount_step,
+    select coalesce((select min(coalesce(m.amount_step, c.amount_step)) from payment_methods m where m.enabled and m.payout_enabled), c.amount_step) as amount_step,
       greatest(coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount), c.min_amount) as min_amount,
       coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
       from config c`)[0]!;
@@ -328,8 +328,10 @@ export async function onTopupAmountText(msg: Message, text: string): Promise<voi
   if (!withdrawId) return;
   const amount = parseAmount(text);
   if (amount === null || amount <= 0) return void (await msg.reply('That doesn\'t look like an amount. Try `20`.'));
-  const cfg = (await db()<{ amount_step: number }[]>`select amount_step from config where id`)[0]!;
-  if (cfg.amount_step > 0 && amount % cfg.amount_step !== 0) {
+  const cfg = (await db()<{ amount_step: number }[]>`
+    select coalesce(pm.amount_step, (select amount_step from config where id)) as amount_step
+      from withdraw_requests w join payment_methods pm on pm.id = w.method_id where w.id = ${withdrawId}`)[0];
+  if (cfg && cfg.amount_step > 0 && amount % cfg.amount_step !== 0) {
     return void (await msg.reply(`Please add in whole multiples of ${whole(cfg.amount_step)} — no cents.`));
   }
   try {
