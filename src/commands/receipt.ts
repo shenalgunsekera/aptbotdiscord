@@ -132,10 +132,12 @@ async function handleStripe(msg: Message, attUrl: string, playerId: string, plat
         url = stored.url;
         await sql`update stripe_claims set receipt_url = ${url} where id = ${claim!.id}`;
       }
-      // Webhook amount if it matched (the actual figure), else the amount chosen in
-      // the bot — so an amount is always on file and the admin gets one-tap Verify.
-      await sql`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
-      await sql`update stripe_claims set amount = coalesce(amount, ${amount ?? null}::bigint) where id = ${claim!.id}`;
+      // The amount the player entered in the bot is the source of truth (a validated
+      // figure) — NOT whatever autolink happened to match. autolink only matches by
+      // recency, so it can grab a DIFFERENT player's recent Stripe event; prefer the
+      // in-bot amount and fall back to the matched one only if the player gave none.
+      await sql`select stripe_claim_autolink(${claim!.id}::uuid, ${amount ?? null}::bigint) as amt`;
+      await sql`update stripe_claims set amount = coalesce(${amount ?? null}::bigint, amount) where id = ${claim!.id}`;
       const [cur] = await sql<{ amount: number | null }[]>`select amount from stripe_claims where id = ${claim!.id}`;
       const [pl] = await sql<{ display_name: string | null }[]>`select display_name from players where id = ${playerId}`;
       await sql`select notify_admins('stripe.claim', 'stripe_claim', ${claim!.id}::uuid, ${sql.json({
