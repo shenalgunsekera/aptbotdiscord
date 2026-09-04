@@ -4,6 +4,7 @@ import {
   type Interaction, type Message,
 } from 'discord.js';
 import { CONFIG } from './config.js';
+import { db } from './db.js';
 import { ses } from './session.js';
 import { registerCommands } from './register-commands.js';
 import { Notifier } from './notifier.js';
@@ -23,6 +24,10 @@ const client = new Client({
 client.once(Events.ClientReady, (c) => {
   console.log(`[discord] logged in as ${c.user.tag}`);
   new Notifier(c).start();
+  // Keep the single DB connection exercised so any idle-drop is recovered BETWEEN
+  // commands, never in the middle of one (which is what made every command "not
+  // respond"). Cheap round-trip every 3 min; unref so it never holds the process.
+  setInterval(() => { void db()`select 1`.then(() => {}, (e) => console.error('[db keepalive]', e?.message ?? e)); }, 3 * 60_000).unref();
 });
 
 // Chat is where everything is answered: a typed message either answers a pending

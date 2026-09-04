@@ -25,6 +25,16 @@ export function db(): Sql {
     // Serverless wants a tiny pool: every warm function holds its own, and Neon
     // has a connection ceiling. Default low; PG_POOL_MAX overrides.
     max: Number(process.env.PG_POOL_MAX ?? (pooled ? 1 : 10)),
+    // This bot is a SINGLE long-running process, not serverless — so its one
+    // connection persists. Neon (via PgBouncer) drops IDLE connections, and with
+    // no recycling the bot keeps using that dead socket: the next query hangs with
+    // no timeout, which surfaces on Discord as "The application did not respond" on
+    // EVERY command. (The serverless Telegram bot never hits this — it opens a
+    // fresh connection each invocation.) Recycle connections and fail a dead one
+    // fast so a stuck socket can never take the whole bot down.
+    idle_timeout: 30,        // close a connection after 30s idle → next query opens a fresh one
+    max_lifetime: 60 * 20,   // recycle every 20 min regardless
+    connect_timeout: 15,     // a dead endpoint fails in 15s, never hangs indefinitely
     ...(pooled ? { prepare: false } : {}),
     onnotice: () => {},
     transform: { undefined: null },
