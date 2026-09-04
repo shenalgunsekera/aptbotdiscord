@@ -21,16 +21,33 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-// Never let a stray async error take the whole bot down. Node kills the process
-// on an unhandled rejection by default — one failed DB call in some corner would
-// then knock out EVERY command. Log and keep serving; per-interaction handlers
-// already catch and report their own errors.
+// Never let a stray async error take the whole bot down. A failed DB call in
+// some corner would otherwise knock out EVERY command. Log and keep serving;
+// per-interaction handlers already catch and report their own errors.
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e));
 client.on(Events.Error, (e) => console.error('[discord client error]', e));
 client.on(Events.ShardError, (e) => console.error('[discord shard error]', e));
 
+// Track the gateway connection so /health tells the truth and a dead gateway can
+// self-heal. "did not respond" on every command = the process is up but the
+// gateway silently died and discord.js never reconnected — a zombie.
+let hasBeenReady = false;
+client.on(Events.ShardDisconnect, (ev, id) => console.error(`[gateway] shard ${id} disconnected (code ${ev.code})`));
+client.on(Events.ShardReconnecting, (id) => console.warn(`[gateway] shard ${id} reconnecting`));
+client.on(Events.ShardResume, (id) => console.log(`[gateway] shard ${id} resumed`));
+// Watchdog: if we were connected and the gateway has since dropped and NOT
+// recovered, exit so the host restarts us fresh (a clean reconnect). Never fires
+// during the initial connect — only after we've been ready at least once.
+setInterval(() => {
+  if (hasBeenReady && !client.isReady()) {
+    console.error('[watchdog] gateway down after being ready — exiting for a clean restart');
+    process.exit(1);
+  }
+}, 30_000).unref();
+
 client.once(Events.ClientReady, (c) => {
+  hasBeenReady = true;
   console.log(`[discord] logged in as ${c.user.tag}`);
   new Notifier(c).start();
   // Keep the single DB connection exercised so any idle-drop is recovered BETWEEN
@@ -195,7 +212,15 @@ async function replyError(i: Interaction): Promise<void> {
 // Harmless everywhere else (a VM just ignores it).
 function startHealthServer(): void {
   const port = Number(process.env.PORT ?? 8080);
-  createServer((_req, res) => { res.writeHead(200); res.end('ok'); }).listen(port, () => console.log(`[health] listening on ${port}`));
+  createServer((_req, res) => {
+    // Report the REAL bot health, not just "the HTTP server is up". A ready
+    // gateway → 200; a zombie (process alive, gateway dead) → 503, so an uptime
+    // pinger / Render health check can see it and restart us.
+    const ready = client.isReady();
+    const body = JSON.stringify({ ready, wsStatus: client.ws.status, ping: client.ws.ping });
+    res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
+    res.end(body);
+  }).listen(port, () => console.log(`[health] listening on ${port}`));
 }
 
 // This always-on process drives the panel's cron every minute so crypto/email
