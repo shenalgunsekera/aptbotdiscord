@@ -21,6 +21,15 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+// Never let a stray async error take the whole bot down. Node kills the process
+// on an unhandled rejection by default — one failed DB call in some corner would
+// then knock out EVERY command. Log and keep serving; per-interaction handlers
+// already catch and report their own errors.
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
+process.on('uncaughtException', (e) => console.error('[uncaughtException]', e));
+client.on(Events.Error, (e) => console.error('[discord client error]', e));
+client.on(Events.ShardError, (e) => console.error('[discord shard error]', e));
+
 client.once(Events.ClientReady, (c) => {
   console.log(`[discord] logged in as ${c.user.tag}`);
   new Notifier(c).start();
