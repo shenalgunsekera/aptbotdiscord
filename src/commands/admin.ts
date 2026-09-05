@@ -160,7 +160,13 @@ export async function loaderFailReason(i: ModalSubmitInteraction, orderId: strin
   const a = await admin(i); if (!a) return;
   const reason = i.fields.getTextInputValue('reason').trim();
   try { await mutate(async (sql) => await sql`select loader_order_fail(${orderId}::uuid, ${a.id}::uuid, ${reason})`); } catch (e) { return void (await fail(i, e)); }
-  await i.reply({ ephemeral: false, content: `❌ **Failed** · by ${i.user.username} — the player was told the reason.` });
+  // Resolve the CARD in place (remove its buttons) — the modal was opened from the
+  // card's button, so isFromMessage() is true and update() edits that card. The old
+  // reply() left the card live with both buttons, so the same order could be
+  // Done/Failed again after it was already handled.
+  const text = `❌ **Failed** · by ${i.user.username} — the player was told the reason.`;
+  if (i.isFromMessage()) await i.update({ content: text, components: [], embeds: [] });
+  else await i.reply({ content: text });
 }
 
 export async function loaderShort(i: ButtonInteraction, orderId: string): Promise<void> {
@@ -172,7 +178,9 @@ export async function loaderShortAmount(i: ModalSubmitInteraction, orderId: stri
   const cents = parseCents(i.fields.getTextInputValue('amount'));
   if (cents === null) return void (await i.reply({ ephemeral: true, content: 'Send just the number, e.g. `30`.' }));
   try { await mutate(async (sql) => await sql`select loader_order_complete(${orderId}::uuid, ${a.id}::uuid, ${-cents}::bigint, 'via discord')`); } catch (e) { return void (await fail(i, e)); }
-  await i.reply({ ephemeral: false, content: `✅ Recorded ${money(cents)} · by ${i.user.username}` });
+  const text = `✅ Recorded ${money(cents)} · by ${i.user.username}`;
+  if (i.isFromMessage()) await i.update({ content: text, components: [], embeds: [] });
+  else await i.reply({ content: text });
 }
 
 /** "I paid it" on a cash-out → ask for a screenshot (posted in the channel). A
