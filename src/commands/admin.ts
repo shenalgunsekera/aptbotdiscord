@@ -9,20 +9,31 @@ import { ses } from '../session.js';
 import { money } from '../words.js';
 import { editDiscordCard } from '../notifier.js';
 
+type Repli = ButtonInteraction | ModalSubmitInteraction | ChatInputCommandInteraction;
+
+// These work whether or not the interaction was already deferred/acked, so a
+// handler can deferUpdate() up front (to survive a slow DB and never "This
+// interaction failed") without every reply/edit below having to care.
+const ephemeral = (i: Repli, content: string) =>
+  (i.deferred || i.replied) ? i.followUp({ ephemeral: true, content }) : i.reply({ ephemeral: true, content });
+/** Edit the card a button was on — update() before we've acked, editReply() after. */
+const edit = (i: ButtonInteraction, opts: Parameters<ButtonInteraction['update']>[0]) =>
+  (i.deferred || i.replied) ? i.editReply(opts as Parameters<ButtonInteraction['editReply']>[0]) : i.update(opts);
+
 async function admin(i: ButtonInteraction | ModalSubmitInteraction): Promise<{ id: string } | null> {
   const a = await currentAdmin(i.user.id);
-  if (!a) { await i.reply({ ephemeral: true, content: 'Admins only.' }); return null; }
+  if (!a) { await ephemeral(i, 'Admins only.'); return null; }
   return a;
 }
-async function fail(i: ButtonInteraction | ModalSubmitInteraction | ChatInputCommandInteraction, e: unknown): Promise<void> {
-  if (isUserError(e)) { await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` }); return; }
+async function fail(i: Repli, e: unknown): Promise<void> {
+  if (isUserError(e)) { await ephemeral(i, `❌ ${userMessage(e)}`); return; }
   throw e;
 }
 async function fail2(msg: Message, e: unknown): Promise<void> {
   if (isUserError(e)) { await msg.reply(`❌ ${userMessage(e)}`); return; }
   throw e;
 }
-const done = (i: ButtonInteraction, text: string) => i.update({ content: text, components: [] });
+const done = (i: ButtonInteraction, text: string) => edit(i, { content: text, components: [] });
 
 /**
  * The identity block on EVERY loader card — the platform ACCOUNT name (ClubGG
@@ -62,6 +73,7 @@ export async function approve(i: ButtonInteraction, ppId: string): Promise<void>
  * same card into Done/Failed. 🗑 Discard silently rejects (no credit).
  */
 export async function verify(i: ButtonInteraction, fillId: string): Promise<void> {
+  await i.deferUpdate();   // ack in <1s so a slow DB can't "This interaction failed"
   const a = await admin(i); if (!a) return;
   try {
     await mutate(async (sql) => await sql`select fill_admin_verify(${fillId}::uuid, ${a.id}::uuid, 'verified via discord')`);
@@ -80,9 +92,9 @@ async function advanceLoaderCard(i: ButtonInteraction, adminId: string, fillId: 
     select o.id, o.delta, o.currency, o.status, ${loaderIdSelect()}
       from loader_orders o ${loaderIdJoins()}
      where o.ref_type='fill' and o.ref_id=${fillId} order by o.created_at desc limit 1`;
-  if (!o) return void (await i.update({ content: `✅ **Verified & released** · by ${i.user.username}`, components: [], embeds: [] }));
-  if (o.status === 'done') return void (await i.update({ content: `✅ **Verified & loaded** — ${money(o.delta, o.currency)} added to their table.`, components: [], embeds: [] }));
-  if (o.status === 'cancelled' || o.status === 'failed') return void (await i.update({ content: `✅ **Verified** — loading was ${o.status}.`, components: [], embeds: [] }));
+  if (!o) return void (await edit(i, { content: `✅ **Verified & released** · by ${i.user.username}`, components: [], embeds: [] }));
+  if (o.status === 'done') return void (await edit(i, { content: `✅ **Verified & loaded** — ${money(o.delta, o.currency)} added to their table.`, components: [], embeds: [] }));
+  if (o.status === 'cancelled' || o.status === 'failed') return void (await edit(i, { content: `✅ **Verified** — loading was ${o.status}.`, components: [], embeds: [] }));
 
   try { await mutate(async (sql) => await sql`select loader_order_claim(${o.id}::uuid, ${adminId}::uuid)`); } catch { /* raced */ }
   await db()`update notifications set status='skipped' where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
@@ -93,18 +105,20 @@ async function advanceLoaderCard(i: ButtonInteraction, adminId: string, fillId: 
     new ButtonBuilder().setCustomId(`lo:done:${o.id}:${o.delta}`).setLabel(`✅ Done — added ${money(o.delta, o.currency)}`).setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`lo:fail:${o.id}`).setLabel('❌ Failed').setStyle(ButtonStyle.Danger),
   );
-  await i.update({ content: `🎰 **ADD ${money(o.delta, o.currency)}** to their table — ${loaderIdentity(o)}\n_Claimed by ${i.user.username}._ Add it, then:`, components: [r] });
+  await edit(i, { content: `🎰 **ADD ${money(o.delta, o.currency)}** to their table — ${loaderIdentity(o)}\n_Claimed by ${i.user.username}._ Add it, then:`, components: [r] });
 }
 
 /** 🗑 Discard — payment didn't land: silent reject, no credit, slice returns. */
 export async function discard(i: ButtonInteraction, fillId: string): Promise<void> {
+  await i.deferUpdate();
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select fill_admin_discard(${fillId}::uuid, ${a.id}::uuid)`); } catch (e) { return void (await fail(i, e)); }
-  await i.update({ content: `🗑 **Payment discarded** · by ${i.user.username}`, components: [], embeds: [] });
+  await edit(i, { content: `🗑 **Payment discarded** · by ${i.user.username}`, components: [], embeds: [] });
 }
 
 /** Claim a loader job → swap to do/fail actions. */
 export async function loaderClaim(i: ButtonInteraction, orderId: string): Promise<void> {
+  await i.deferUpdate();
   const a = await admin(i); if (!a) return;
   try {
     await mutate(async (sql) => await sql`select loader_order_claim(${orderId}::uuid, ${a.id}::uuid)`);
@@ -124,20 +138,21 @@ async function showLoaderStep(i: ButtonInteraction, orderId: string): Promise<vo
       left join admins a on a.id = o.claimed_by
       ${loaderIdJoins()}
      where o.id = ${orderId}`;
-  if (!o) return void (await i.update({ content: '↩️ That task no longer exists.', components: [], embeds: [] }));
+  if (!o) return void (await edit(i, { content: '↩️ That task no longer exists.', components: [], embeds: [] }));
   const load = o.delta > 0;
-  if (o.status === 'done') return void (await i.update({ content: `✅ **Done** — ${money(Math.abs(o.delta), o.currency)} ${load ? 'added' : 'taken off'}.`, components: [], embeds: [] }));
-  if (o.status === 'cancelled' || o.status === 'failed') return void (await i.update({ content: `⚠️ **${o.status[0]!.toUpperCase() + o.status.slice(1)}** — ${money(Math.abs(o.delta), o.currency)}.`, components: [], embeds: [] }));
+  if (o.status === 'done') return void (await edit(i, { content: `✅ **Done** — ${money(Math.abs(o.delta), o.currency)} ${load ? 'added' : 'taken off'}.`, components: [], embeds: [] }));
+  if (o.status === 'cancelled' || o.status === 'failed') return void (await edit(i, { content: `⚠️ **${o.status[0]!.toUpperCase() + o.status.slice(1)}** — ${money(Math.abs(o.delta), o.currency)}.`, components: [], embeds: [] }));
 
   const r = new ActionRowBuilder<ButtonBuilder>();
   r.addComponents(new ButtonBuilder().setCustomId(`lo:done:${orderId}:${o.delta}`).setLabel(load ? `✅ Done — added ${money(o.delta, o.currency)}` : `✅ All ${money(-o.delta, o.currency)}`).setStyle(ButtonStyle.Success));
   if (!load) r.addComponents(new ButtonBuilder().setCustomId(`lo:short:${orderId}`).setLabel('✏️ Different amount').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`lo:done:${orderId}:0`).setLabel('❌ Nothing there').setStyle(ButtonStyle.Secondary));
   else r.addComponents(new ButtonBuilder().setCustomId(`lo:fail:${orderId}`).setLabel('❌ Failed').setStyle(ButtonStyle.Danger));
   const by = o.claimer ? `_Claimed by ${o.claimer}._` : '';
-  await i.update({ content: `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}** — ${loaderIdentity(o)}\n${by} Tap the amount you actually ${load ? 'added' : 'took off'}:`, components: [r] });
+  await edit(i, { content: `🎰 **${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}** — ${loaderIdentity(o)}\n${by} Tap the amount you actually ${load ? 'added' : 'took off'}:`, components: [r] });
 }
 
 export async function loaderDone(i: ButtonInteraction, orderId: string, delta: number): Promise<void> {
+  await i.deferUpdate();
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select loader_order_complete(${orderId}::uuid, ${a.id}::uuid, ${delta}::bigint, 'via discord')`); }
   catch (e) {
@@ -252,9 +267,10 @@ export async function sbMade(i: ButtonInteraction, playerId: string): Promise<vo
 
 /** Stripe: credit the matched amount, or ask for it. */
 export async function stripeOk(i: ButtonInteraction, claimId: string): Promise<void> {
+  await i.deferUpdate();
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select stripe_claim_credit(${claimId}::uuid, ${a.id}::uuid, null)`); } catch (e) { return void (await fail(i, e)); }
-  await i.update({ content: `✅ **Credited** · by ${i.user.username}`, components: [], embeds: [] });
+  await edit(i, { content: `✅ **Credited** · by ${i.user.username}`, components: [], embeds: [] });
 }
 export async function stripeCredit(i: ButtonInteraction, claimId: string): Promise<void> {
   if (!(await admin(i))) return;
@@ -262,9 +278,10 @@ export async function stripeCredit(i: ButtonInteraction, claimId: string): Promi
 }
 /** 🗑 Discard a Stripe receipt — no credit, symmetric with a P2P/club Discard. */
 export async function stripeDiscard(i: ButtonInteraction, claimId: string): Promise<void> {
+  await i.deferUpdate();
   const a = await admin(i); if (!a) return;
   try { await mutate(async (sql) => await sql`select stripe_claim_discard(${claimId}::uuid, ${a.id}::uuid)`); } catch (e) { return void (await fail(i, e)); }
-  await i.update({ content: `🗑 **Discarded** · by ${i.user.username}`, components: [], embeds: [] });
+  await edit(i, { content: `🗑 **Discarded** · by ${i.user.username}`, components: [], embeds: [] });
 }
 export async function stripeCreditAmount(i: ModalSubmitInteraction, claimId: string): Promise<void> {
   const a = await admin(i); if (!a) return;
