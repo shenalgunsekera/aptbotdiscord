@@ -39,11 +39,6 @@ export const COMMANDS = [
     .addStringOption((o) => o.setName('email').setDescription('Their email — how they sign in to the website').setRequired(true))
     .addBooleanOption((o) => o.setName('owner').setDescription('Make them an owner instead of an admin')),
   new SlashCommandBuilder().setName('totals').setDescription('(admin) Deposited & cashed-out totals per platform'),
-  new SlashCommandBuilder().setName('addpayout').setDescription('(admin) Add a Venmo/Zelle tag to the cash-out queue, paid from the club float')
-    .addStringOption((o) => o.setName('method').setDescription('Venmo or Zelle').setRequired(true)
-      .addChoices({ name: 'Venmo', value: 'venmo' }, { name: 'Zelle', value: 'zelle' }))
-    .addNumberOption((o) => o.setName('amount').setDescription('Amount to pay ($)').setRequired(true).setMinValue(1))
-    .addStringOption((o) => o.setName('handle').setDescription('The Venmo/Zelle tag to pay').setRequired(true)),
 ].map((c) => c.toJSON());
 
 export async function registerCommands(): Promise<void> {
