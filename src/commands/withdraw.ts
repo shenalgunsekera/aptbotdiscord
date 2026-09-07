@@ -335,8 +335,9 @@ export async function onTopupAmountText(msg: Message, text: string): Promise<voi
     return void (await msg.reply(`Please add in whole multiples of ${whole(cfg.amount_step)} — no cents.`));
   }
   try {
-    // The DB does the full check (still queued, not cancelling, one add-on at a
-    // time, method cap, daily cap) and raises the extra take-off card for admins.
+    // The DB does the full check (still queued, not cancelling, method cap,
+    // daily cap — including any add-ons already in flight) and raises the extra
+    // take-off card for admins. Multiple add-ons may be in flight at once (0110).
     await mutate(async (sql) => await sql`select withdraw_topup(${withdrawId}::uuid, ${amount}::bigint)`);
   } catch (e) {
     if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`));
