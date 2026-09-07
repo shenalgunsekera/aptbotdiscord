@@ -156,10 +156,12 @@ export function render(n: Notification): Rendered | null {
     case 'withdraw.cancel_confirmed':
       return { content: `✅ **Cancellation confirmed.** ${m(p.amount, p.currency)} has been put back on your table.` };
     case 'withdraw.paid': {
-      const hasImg = p.receipt && String(p.receipt).startsWith('http');
+      // Up to two receipts (new `receipts` array), falling back to the single one.
+      const imgs: string[] = (Array.isArray(p.receipts) && p.receipts.length ? p.receipts : (p.receipt ? [p.receipt] : []))
+        .filter((u: unknown) => typeof u === 'string' && u.startsWith('http'));
       return {
         content: `💸 **You've been paid ${m(p.amount, p.currency)}!**` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : ''),
-        ...(hasImg ? { embeds: imgEmbeds([p.receipt]) } : {}),
+        ...(imgs.length ? { embeds: imgEmbeds(imgs) } : {}),
       };
     }
     case 'withdraw.reduced_player':
