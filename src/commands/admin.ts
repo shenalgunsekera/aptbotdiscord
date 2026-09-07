@@ -334,6 +334,26 @@ export async function totalsCmd(i: ChatInputCommandInteraction): Promise<void> {
   });
 }
 
+/** (admin) Add a Venmo/Zelle tag to the cash-out queue, funded by the club float.
+ *  Any matching P2P deposit fills it (from any platform); the club float covers it. */
+export async function addQueuePayout(i: ChatInputCommandInteraction): Promise<void> {
+  const a = await currentAdmin(i.user.id);
+  if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
+  const code = i.options.getString('method', true);
+  const amount = Math.round(i.options.getNumber('amount', true) * 100);
+  const handle = i.options.getString('handle', true).trim();
+  if (!Number.isFinite(amount) || amount <= 0) return void (await i.reply({ ephemeral: true, content: 'Enter a valid amount.' }));
+  if (!handle) return void (await i.reply({ ephemeral: true, content: 'Enter the Venmo/Zelle tag to pay.' }));
+  const [m] = await db()<{ id: string }[]>`select id from payment_methods where code = ${code} and enabled and settlement = 'p2p' limit 1`;
+  if (!m) return void (await i.reply({ ephemeral: true, content: `${code} isn't set up as a P2P method.` }));
+  const [pf] = await db()<{ id: string }[]>`select id from platforms where enabled order by sort_order, name limit 1`;
+  if (!pf) return void (await i.reply({ ephemeral: true, content: 'No platform is set up.' }));
+  try {
+    await mutate(async (sql) => await sql`select withdraw_create_club(${m.id}::uuid, ${pf.id}::uuid, ${amount}::bigint, ${handle}, ${a.id}::uuid)`);
+    await i.reply({ ephemeral: false, content: `✅ Added a **${code}** payout of **${money(amount)}** to the queue → \`${handle}\`. The next matching deposit fills it — covered by the club float.` });
+  } catch (e) { if (isUserError(e)) return void (await i.reply({ ephemeral: true, content: `❌ ${userMessage(e)}` })); throw e; }
+}
+
 export async function pauseWithdraw(i: ChatInputCommandInteraction): Promise<void> {
   const a = await currentAdmin(i.user.id);
   if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
