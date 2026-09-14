@@ -89,6 +89,7 @@ async function routeText(msg: Message, pending: string, text: string): Promise<v
     case 'wd_handle': return void (await withdraw.onHandleText(msg, text));
     case 'wd_reduce': return void (await withdraw.onReduceText(msg, text));
     case 'wd_topup_amount': return void (await withdraw.onTopupAmountText(msg, text));
+    case 'w2_amount': return void (await withdraw.onW2AmountText(msg, text));
     case 'cancel_amount': return void (await withdraw.onCancelAmountText(msg, text));
     case 'edit_payout': return void (await edit.payoutHandleText(msg, text));
     case 'edit_acct': return void (await edit.acctText(msg, text));
@@ -116,6 +117,7 @@ async function onSlash(i: any): Promise<void> {
     case 'withdraw': return void (await withdraw.withdraw(i));
     case 'cancelwithdraw': return void (await withdraw.cancelWithdraw(i));
     case 'addtowithdraw': return void (await withdraw.addToWithdraw(i));
+    case 'withdraw2': return void (await withdraw.withdraw2(i));
     case 'pending': return void (await reads.pending(i));
     case 'withdrawalhistory': return void (await reads.withdrawalHistory(i));
     case 'deposithistory': return void (await reads.depositHistory(i));
@@ -177,6 +179,9 @@ async function onComponent(i: any): Promise<void> {
   if (id.startsWith('wc:part:')) return void (await withdraw.cancelPart(i, arg));
   if (id.startsWith('wd:reduce:')) return void (await withdraw.reducePrompt(i, arg));
   if (id.startsWith('wt:pick:')) return void (await withdraw.topupPick(i, arg));
+  if (id === 'w2:pf') return void (await withdraw.onPlatform2(i));
+  if (id === 'w2:a') return void (await withdraw.onPickA2(i));
+  if (id === 'w2:b') return void (await withdraw.onPickB2(i));
 
   // ── admin ──
   if (id.startsWith('pl:approve:')) return void (await admin.approve(i, arg));

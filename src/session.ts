@@ -12,7 +12,7 @@
 export type Pending =
   | 'name' | 'acct' | 'clubgg_user' | 'sb_user' | 'sb_pass'
   | 'payout_handle' | 'payout_name' | 'dep_amount' | 'wd_amount' | 'wd_handle' | 'wd_reduce'
-  | 'wd_topup_amount'
+  | 'wd_topup_amount' | 'w2_amount'
   | 'edit_payout' | 'edit_payout_name' | 'edit_acct' | 'edit_clubgg_user' | 'cancel_amount' | 'pay_receipt';
 
 export interface Session {
@@ -40,6 +40,10 @@ export interface Session {
   outPlatform?: string;
   outAmount?: number;
   outMethod?: string;
+  // split cash-out (/withdraw2)
+  w2Platform?: string;
+  w2MethodA?: string;
+  w2MethodB?: string;
   payoutHandle?: string;   // Zelle: the handle we just saved, awaiting the holder name
   // edit flows
   editAddPlatforms?: string[];   // platforms being added via /editplatform (awaiting account ids)

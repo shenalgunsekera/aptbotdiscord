@@ -13,6 +13,7 @@ export const COMMANDS = [
   new SlashCommandBuilder().setName('withdraw').setDescription('Cash-out'),
   new SlashCommandBuilder().setName('cancelwithdraw').setDescription('Cancel a cash-out that has not been paid'),
   new SlashCommandBuilder().setName('addtowithdraw').setDescription('Add more to a cash-out already in the queue'),
+  new SlashCommandBuilder().setName('withdraw2').setDescription('Cash-out split across two methods (e.g. Venmo + Zelle)'),
   new SlashCommandBuilder().setName('pending').setDescription('Your pending cash-outs'),
   new SlashCommandBuilder().setName('withdrawalhistory').setDescription('Cash-outs paid to you & receipts'),
   new SlashCommandBuilder().setName('deposithistory').setDescription('Deposits you made & receipts'),

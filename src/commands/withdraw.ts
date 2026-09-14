@@ -381,3 +381,140 @@ export async function onReduceText(msg: Message, text: string): Promise<void> {
   catch (e) { if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`)); throw e; }
   await msg.reply(`✅ Done — **${money(amount)}** is coming back to your table. The rest is still on its way.`);
 }
+
+// ─── /withdraw2 — split cash-out across two methods (e.g. Venmo + Zelle) ──────
+// One cash-out for the total, fillable by EITHER method's depositors against one
+// shared pool. Mirrors the Telegram bot; the DB (withdraw_create_split /
+// deposit_match, migration 0113) does all the money logic.
+
+interface W2Eligible { id: string; name: string; code: string; handle: string }
+
+async function w2Eligible(playerId: string): Promise<W2Eligible[]> {
+  return db()<W2Eligible[]>`
+    select distinct on (m.id) m.id, m.name, m.code,
+           first_value(h.handle) over (partition by m.id
+             order by h.last_used_at desc nulls last, h.created_at desc) as handle
+      from payout_handles h
+      join payment_methods m on m.id = h.method_id
+     where h.player_id = ${playerId}
+       and m.enabled and m.payout_enabled and m.split_eligible
+     order by m.id`;
+}
+
+const W2_NEED_TWO =
+  '🔀 **/withdraw2** pays one cash-out across **two** methods (like Venmo and Zelle) — ' +
+  'whoever pays you first fills it, up to the total.\n\n' +
+  'You need **two** of those set up with a saved payout handle. Add one with `/editwithdraw`, then try again.';
+
+async function w2Limits(methodA: string, methodB: string) {
+  const [r] = await db()<{ min_amount: number; max_amount: number; amount_step: number }[]>`
+    select greatest(coalesce(a.min_amount, c.min_amount), coalesce(b.min_amount, c.min_amount)) as min_amount,
+           least(coalesce(a.max_amount, c.max_amount), coalesce(b.max_amount, c.max_amount)) as max_amount,
+           greatest(coalesce(a.amount_step, c.amount_step), coalesce(b.amount_step, c.amount_step)) as amount_step
+      from config c, payment_methods a, payment_methods b
+     where a.id = ${methodA} and b.id = ${methodB}`;
+  return r!;
+}
+
+export async function withdraw2(i: ChatInputCommandInteraction): Promise<void> {
+  const p = await currentPlayer(i.user.id);
+  if (!p) return void (await say(i, 'Send `/start` to set up first.'));
+  if (p.status !== 'active') return void (await say(i, "You're almost ready — we just need to confirm your account first."));
+  const [cfg] = await db()<{ on: boolean }[]>`select split_cashout_enabled as on from config where id`;
+  if (!cfg?.on) return void (await say(i, "Split cash-outs aren't available right now. Use `/withdraw` instead."));
+  const elig = await w2Eligible(p.id);
+  if (elig.length < 2) return void (await say(i, W2_NEED_TWO));
+  const platforms = await confirmedPlatforms(p.id);
+  if (platforms.length === 0) return void (await say(i, "You don't have a confirmed account on any platform yet. `/start` first."));
+  if (platforms.length === 1) return void (await afterPlatform2(i, platforms[0]!.id));
+  await say(i, 'Where do you want to cash-out from?', [selectRow('w2:pf', 'Choose platform', platforms.map((pf) => ({ label: pf.name, value: pf.id })))]);
+}
+
+export async function onPlatform2(i: StringSelectMenuInteraction): Promise<void> {
+  await i.update({ components: [] });
+  await afterPlatform2(i, i.values[0]!);
+}
+
+async function afterPlatform2(i: ChatInputCommandInteraction | StringSelectMenuInteraction, platformId: string): Promise<void> {
+  const p = (await currentPlayer(i.user.id))!;
+  const s = ses(i.user.id);
+  s.w2Platform = platformId;
+  const elig = await w2Eligible(p.id);
+  if (elig.length < 2) return void (await say(i, W2_NEED_TWO));
+  if (elig.length === 2) {
+    s.w2MethodA = elig[0]!.id; s.w2MethodB = elig[1]!.id;
+    return void (await promptAmount2(i, elig[0]!.name, elig[1]!.name));
+  }
+  await say(i, 'Pick the **first** method for your split:',
+    [selectRow('w2:a', 'First method', elig.map((m) => ({ label: m.name, value: m.id })))]);
+}
+
+export async function onPickA2(i: StringSelectMenuInteraction): Promise<void> {
+  const p = (await currentPlayer(i.user.id))!;
+  const s = ses(i.user.id);
+  s.w2MethodA = i.values[0]!;
+  await i.update({ components: [] });
+  const rest = (await w2Eligible(p.id)).filter((m) => m.id !== s.w2MethodA);
+  await say(i, 'And the **second** method:',
+    [selectRow('w2:b', 'Second method', rest.map((m) => ({ label: m.name, value: m.id })))]);
+}
+
+export async function onPickB2(i: StringSelectMenuInteraction): Promise<void> {
+  const s = ses(i.user.id);
+  s.w2MethodB = i.values[0]!;
+  await i.update({ components: [] });
+  const [names] = await db()<{ a: string; b: string }[]>`
+    select a.name as a, b.name as b from payment_methods a, payment_methods b where a.id = ${s.w2MethodA!} and b.id = ${s.w2MethodB!}`;
+  await promptAmount2(i, names!.a, names!.b);
+}
+
+async function promptAmount2(i: ChatInputCommandInteraction | StringSelectMenuInteraction, nameA: string, nameB: string): Promise<void> {
+  const s = ses(i.user.id);
+  const lim = await w2Limits(s.w2MethodA!, s.w2MethodB!);
+  s.pending = 'w2_amount';
+  await sayChat(i,
+    `Splitting between **${nameA}** and **${nameB}**. How much **in total**? ` +
+    `Between ${whole(lim.min_amount)} and ${whole(lim.max_amount)}, in multiples of ${whole(lim.amount_step)} — ` +
+    `just **type the number** here, like \`100\`.`);
+}
+
+export async function onW2AmountText(msg: Message, text: string): Promise<void> {
+  const p = await currentPlayer(msg.author.id); const s = ses(msg.author.id);
+  if (!p || !s.w2Platform || !s.w2MethodA || !s.w2MethodB) return;
+  const amount = parseAmount(text);
+  if (amount === null) return void (await msg.reply('That doesn\'t look like an amount. Try `100`.'));
+  const lim = await w2Limits(s.w2MethodA, s.w2MethodB);
+  const problem = amountProblem(amount, { min: lim.min_amount, max: lim.max_amount, step: lim.amount_step });
+  if (problem) return void (await msg.reply(problem));
+
+  const handleFor = async (methodId: string) => {
+    const [h] = await db()<{ handle: string }[]>`
+      select handle from payout_handles where player_id = ${p.id} and method_id = ${methodId}
+       order by last_used_at desc nulls last, created_at desc limit 1`;
+    return h?.handle ?? '';
+  };
+  const handleA = await handleFor(s.w2MethodA);
+  const handleB = await handleFor(s.w2MethodB);
+  if (!handleA || !handleB) { s.pending = undefined; return void (await msg.reply(W2_NEED_TWO)); }
+
+  const platformId = s.w2Platform, methodA = s.w2MethodA, methodB = s.w2MethodB;
+  s.pending = undefined; s.w2Platform = undefined; s.w2MethodA = undefined; s.w2MethodB = undefined;
+  let w: WithdrawRequest;
+  try {
+    const rows = await mutate(async (sql) => await sql<WithdrawRequest[]>`
+      select * from withdraw_create_split(${p.id}::uuid, ${platformId}::uuid, ${methodA}::uuid, ${handleA}, ${methodB}::uuid, ${handleB}, ${amount}::bigint)`);
+    w = rows[0]!;
+  } catch (e) {
+    if (isUserError(e)) return void (await msg.reply(`❌ ${userMessage(e)}`));
+    console.error('withdraw_create_split failed:', e);
+    return void (await msg.reply('Something went wrong. Nothing was taken from your account. Try again shortly.'));
+  }
+  const [names] = await db()<{ a: string; b: string }[]>`
+    select a.name as a, b.name as b from payment_methods a, payment_methods b where a.id = ${methodA} and b.id = ${methodB}`;
+  const amt = money(w.requested_amount, w.currency);
+  await msg.reply(
+    `✅ **Cashing out ${amt} — split between ${names!.a} and ${names!.b}.**\n` +
+    `We're taking it off your table now. Whoever pays you first fills it — via **${names!.a}** (${handleA}) or ` +
+    `**${names!.b}** (${handleB}) — up to **${amt}** total. While one side is being paid, the other holds only what's ` +
+    `left, and we never pay more than ${amt}. Track it with \`/pending\`.`);
+}
