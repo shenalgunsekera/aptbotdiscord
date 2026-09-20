@@ -135,6 +135,7 @@ async function onSlash(i: any): Promise<void> {
     case 'reversepayment': return void (await admin.reversePayment(i));
     case 'paymentchannel': return void (await admin.setChannel(i, 'payments'));
     case 'adminchannel': return void (await admin.setChannel(i, 'admin'));
+    case 'escalations': return void (await admin.setChannel(i, 'escalation'));
     case 'setadmin': return void (await admin.setAdmin(i));
     case 'totals': return void (await admin.totalsCmd(i));
     default: await i.reply({ ephemeral: true, content: 'Unknown command.' });

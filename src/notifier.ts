@@ -29,8 +29,8 @@ export class Notifier {
 
   async tick(): Promise<number> {
     const sql = db();
-    const [cfg] = await sql<{ discord_admin_channel_id: string | null; discord_payments_channel_id: string | null }[]>`
-      select discord_admin_channel_id, discord_payments_channel_id from config where id`;
+    const [cfg] = await sql<{ discord_admin_channel_id: string | null; discord_payments_channel_id: string | null; discord_escalation_channel_id: string | null }[]>`
+      select discord_admin_channel_id, discord_payments_channel_id, discord_escalation_channel_id from config where id`;
 
     const rows = await sql<Notification[]>`
       with c as (
@@ -51,8 +51,12 @@ export class Notifier {
 
     let sent = 0;
     for (const n of rows) {
+      // Escalation posts go ONLY to the escalation channel; money-in to the
+      // payments channel; everything else to the admin channel.
       const channelId = n.audience === 'admins'
-        ? ((n.kind === 'payment.detected' ? cfg?.discord_payments_channel_id : null) ?? cfg?.discord_admin_channel_id)
+        ? (n.kind === 'escalation.item'
+            ? cfg?.discord_escalation_channel_id
+            : ((n.kind === 'payment.detected' ? cfg?.discord_payments_channel_id : null) ?? cfg?.discord_admin_channel_id))
         : chanFor.get(Number(n.id));
       const rendered = render(n);
       if (!channelId || !rendered) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
@@ -110,6 +114,11 @@ export function render(n: Notification): Rendered | null {
   const m = (v: unknown, c?: unknown) => money(Number(v ?? 0), String(c ?? 'USD'));
 
   switch (n.kind) {
+    // ── Staff-attention (escalation) feed ── pre-rendered by the sweep; just print
+    // it. Convert Telegram *bold* to Discord **bold** (the text is shared). No buttons.
+    case 'escalation.item':
+      return { content: String(p.text ?? '').replace(/\*(.+?)\*/g, '**$1**') };
+
     // ── Player-facing ──
     case 'fill.receipt_payee':
     case 'fill.confirm_request':

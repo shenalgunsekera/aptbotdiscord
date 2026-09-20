@@ -35,6 +35,7 @@ export const COMMANDS = [
     .addAttachmentOption((o) => o.setName('receipt').setDescription('Screenshot of the payment (required for a negative amount)')),
   new SlashCommandBuilder().setName('paymentchannel').setDescription('(admin) Make this channel the payments feed'),
   new SlashCommandBuilder().setName('adminchannel').setDescription('(admin) Make this channel the admin channel'),
+  new SlashCommandBuilder().setName('escalations').setDescription('(admin) Make this channel the overdue/small/manual work feed'),
   new SlashCommandBuilder().setName('setadmin').setDescription('(owner) Make someone an admin')
     .addUserOption((o) => o.setName('user').setDescription('Who to make an admin').setRequired(true))
     .addStringOption((o) => o.setName('email').setDescription('Their email — how they sign in to the website').setRequired(true))

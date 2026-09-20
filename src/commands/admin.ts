@@ -443,7 +443,7 @@ export async function adjustCmd(i: ChatInputCommandInteraction): Promise<void> {
  * feed (detected money-in) goes to the payments channel; everything else to the
  * admin channel. Admins only.
  */
-export async function setChannel(i: ChatInputCommandInteraction, which: 'payments' | 'admin'): Promise<void> {
+export async function setChannel(i: ChatInputCommandInteraction, which: 'payments' | 'admin' | 'escalation'): Promise<void> {
   const a = await currentAdmin(i.user.id);
   if (!a) return void (await i.reply({ ephemeral: true, content: 'Admins only.' }));
   const [row] = await db()<{ discord_channel_set: boolean }[]>`
@@ -453,6 +453,8 @@ export async function setChannel(i: ChatInputCommandInteraction, which: 'payment
     ephemeral: false,
     content: which === 'payments'
       ? '✅ This channel is now the **payments feed** — every detected payment lands here.'
+      : which === 'escalation'
+      ? '✅ This channel is now the **staff attention** feed — overdue tasks, small cash-outs and manual cash-outs land here, re-pinged daily until they\'re done.'
       : '✅ This channel is now the **admin channel** (adjustments, verifications, and everything except the payments feed).',
   });
 }
