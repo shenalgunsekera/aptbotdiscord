@@ -191,7 +191,7 @@ function payInstructionCard(fills: Fill[], m: PaymentMethod, matchSecs: number):
   if (only && (only as { withdraw_id?: string }).withdraw_id && (m as { allow_skip_payee?: boolean }).allow_skip_payee) {
     lines.push('_Can\'t send to this tag? Tap the button for the next one in line._');
     components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`dep:skip:${only.id}`).setLabel("⚠️ Can't send? Next tag").setStyle(ButtonStyle.Secondary)));
+      new ButtonBuilder().setCustomId(`dep:skip:${only.id}`).setLabel("⚠️ Can't send to this tag? Click here.").setStyle(ButtonStyle.Secondary)));
   }
   lines.push('_Changed your mind? `/canceldeposit` before you pay._');
   return { content: lines.join('\n'), components };
