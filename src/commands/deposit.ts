@@ -163,22 +163,66 @@ async function runMatch(msg: Message, p: Player, platformId: string, amount: num
   }
 
   const [tcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
-  const lines: string[] = [`**💸 Send your ${m!.name} payment now — you have ${windowLabel(tcfg?.match_timeout_seconds ?? 300)}**\n`];
-  if (fills.length > 1) lines.push(`Your ${money(amount)} is split across **${fills.length} people**. Pay **each** separately:\n`);
+  const card = payInstructionCard(fills, m!, tcfg?.match_timeout_seconds ?? 300);
+  ses(msg.author.id).addFillId = fills[0]!.id;
+  await sendChannel(msg, card.content, card.components);
+}
+
+/** The "send your payment to X" card. Shared by the initial match and the
+ *  skip-to-next-tag re-render. Adds a "can't send → next tag" button only for a
+ *  single PLAYER fill on a skip-enabled method (a club/backstop fill has no next). */
+function payInstructionCard(fills: Fill[], m: PaymentMethod, matchSecs: number): { content: string; components: any[] } {
+  const lines: string[] = [`**💸 Send your ${m.name} payment now — you have ${windowLabel(matchSecs)}**\n`];
+  if (fills.length > 1) lines.push(`Your payment is split across **${fills.length} people**. Pay **each** separately:\n`);
   for (const [idx, f] of fills.entries()) {
     if (fills.length > 1) lines.push(`**── Payment ${idx + 1} of ${fills.length} ──**`);
-    lines.push(`Send via **${m!.name}**: **${money(f.gross_to_send, f.currency)}**`);
-    if (f.gross_to_send !== f.amount) lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m!.name} fee)_`);
+    lines.push(`Send via **${m.name}**: **${money(f.gross_to_send, f.currency)}**`);
+    if (f.gross_to_send !== f.amount) lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m.name} fee)_`);
     lines.push(`Address: \`${f.payout_handle}\``);
-    if (f.payout_name) lines.push(`Name on ${m!.name}: **${f.payout_name}**`);
+    if (f.payout_name) lines.push(`Name on ${m.name}: **${f.payout_name}**`);
     lines.push('');
   }
-  if (m?.code === 'paypal') lines.push('⚠️ **Make sure to send as Friends & Family** (not Goods & Services).\n');
-  lines.push(`Once you've sent it, send ${receiptInstruction(m!.code)} here (upload the image) so we can confirm it.`);
+  if (m.code === 'paypal') lines.push('⚠️ **Make sure to send as Friends & Family** (not Goods & Services).\n');
+  lines.push(`Once you've sent it, send ${receiptInstruction(m.code)} here (upload the image) so we can confirm it.`);
   lines.push('_Got two screenshots? Attach **both to the same message** — a second one sent on its own won\'t be picked up._');
+
+  const components: any[] = [];
+  const only = fills.length === 1 ? fills[0]! : null;
+  if (only && (only as { withdraw_id?: string }).withdraw_id && (m as { allow_skip_payee?: boolean }).allow_skip_payee) {
+    lines.push('_Can\'t send to this tag? Tap the button for the next one in line._');
+    components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`dep:skip:${only.id}`).setLabel("⚠️ Can't send? Next tag").setStyle(ButtonStyle.Secondary)));
+  }
   lines.push('_Changed your mind? `/canceldeposit` before you pay._');
-  ses(msg.author.id).addFillId = fills[0]!.id;
-  await sendChannel(msg, lines.join('\n'));
+  return { content: lines.join('\n'), components };
+}
+
+/** Depositor tapped "can't send to this tag": hand the slice back and show the
+ *  next payee (or the club backstop). See deposit_skip_payee (0121). */
+export async function onDepositSkip(i: ButtonInteraction, fillId: string): Promise<void> {
+  await i.deferUpdate();   // ack fast so a slow DB can't "This interaction failed"
+  const p = await currentPlayer(i.user.id);
+  if (!p) return;
+  const [own] = await db()<{ ok: boolean }[]>`
+    select exists(select 1 from fills f join deposit_requests dr on dr.id = f.deposit_id
+                   where f.id = ${fillId} and dr.player_id = ${p.id}) as ok`;
+  if (!own?.ok) return void (await i.followUp({ ephemeral: true, content: "That isn't your payment." }));
+
+  let nf: Fill;
+  try {
+    const rows = await mutate(async (sql) => await sql<Fill[]>`select * from deposit_skip_payee(${fillId}::uuid)`);
+    nf = rows[0]!;
+  } catch (e) {
+    if (isUserError(e)) return void (await i.followUp({ ephemeral: true, content: `❌ ${userMessage(e)}` }));
+    console.error('deposit_skip_payee failed:', e);
+    return void (await i.followUp({ ephemeral: true, content: 'Something went wrong — try again in a moment.' }));
+  }
+
+  const [m] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${nf.method_id}`;
+  const [tcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
+  const card = payInstructionCard([nf], m!, tcfg?.match_timeout_seconds ?? 300);
+  ses(i.user.id).addFillId = nf.id;   // receipts attach to the new fill now
+  await i.editReply({ content: card.content, components: card.components });
 }
 
 /** PeerPay deposit: mint a checkout link + show Pay button and a "rail not
