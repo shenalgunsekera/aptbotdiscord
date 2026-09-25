@@ -230,6 +230,30 @@ function startHealthServer(): void {
   }).listen(port, () => console.log(`[health] listening on ${port}`));
 }
 
+// Keep the free Render instance AWAKE. Render spins a free web service down after
+// ~15 min with no INBOUND HTTP — and everything else this process does (the DB
+// keepalive, the cron driver) is OUTBOUND, so it doesn't count. A spun-down
+// instance can't ack a Discord interaction in time → "the application did not
+// respond". So we hit our OWN public URL on a timer: that request goes out and
+// back through Render's edge as inbound traffic, resetting the idle clock. Runs
+// well under the 15-min threshold so the bot is never asleep when a command lands.
+function startSelfPing(): void {
+  const base = process.env.RENDER_EXTERNAL_URL
+    ?? process.env.SELF_URL
+    ?? 'https://aptbotdiscord.onrender.com';
+  const url = base.replace(/\/+$/, '') + '/health';
+  const ping = async (): Promise<void> => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 30_000);
+    try { await fetch(url, { signal: ac.signal }); }
+    catch (e) { console.error('[self-ping] failed:', (e as Error).message); }
+    finally { clearTimeout(timer); }
+  };
+  setInterval(() => { void ping(); }, 10 * 60_000);
+  void ping();   // once on boot
+  console.log('[self-ping] keeping', url, 'warm every 10m');
+}
+
 // This always-on process drives the panel's cron every minute so crypto/email
 // detection + sweeps run near-instantly, independent of GitHub Actions (which can
 // be down). Idempotent on the panel side; unset CRON_SECRET = no-op.
@@ -257,6 +281,7 @@ function startCronDriver(): void {
 
 async function main(): Promise<void> {
   startHealthServer();
+  startSelfPing();
   startCronDriver();
   // Connect to Discord FIRST so the bot comes ONLINE immediately. Registering
   // slash commands afterwards means a slow/hanging call or a bad DISCORD_GUILD_ID
