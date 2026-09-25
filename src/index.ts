@@ -309,10 +309,39 @@ function startCronDriver(): void {
   console.log('[cron-driver] driving', CONFIG.cronUrl, 'every 60s');
 }
 
+/** One-shot connectivity probe: proves WHERE the Render→Discord path dies — DNS,
+ *  the REST handshake, or the gateway websocket. login() hanging tells us the REST
+ *  call stalls, but not whether it's a hard network black-hole (abort/timeout) or a
+ *  Cloudflare block (fast 403 + HTML). This logs the exact answer so we stop guessing. */
+async function probeDiscord(): Promise<void> {
+  const { promises: dnsp } = await import('node:dns');
+  for (const host of ['discord.com', 'gateway.discord.gg']) {
+    try {
+      const a = await dnsp.resolve4(host);
+      console.log(`[probe] DNS ${host} A → ${a.join(', ')}`);
+    } catch (e) { console.error(`[probe] DNS ${host} FAILED:`, (e as Error).message); }
+  }
+  // REST GET /gateway/bot with the token — the exact call login() makes first.
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 12_000);
+    const t0 = Date.now();
+    const r = await fetch('https://discord.com/api/v10/gateway/bot', {
+      headers: { Authorization: `Bot ${CONFIG.token}` }, signal: ac.signal,
+    });
+    clearTimeout(timer);
+    const body = (await r.text()).slice(0, 160).replace(/\s+/g, ' ');
+    console.log(`[probe] REST /gateway/bot → HTTP ${r.status} in ${Date.now() - t0}ms — ${body}`);
+  } catch (e) {
+    console.error(`[probe] REST /gateway/bot FAILED/HUNG: ${(e as Error).name} — ${(e as Error).message}`);
+  }
+}
+
 async function main(): Promise<void> {
   startHealthServer();
   startSelfPing();
   startCronDriver();
+  await probeDiscord();   // diagnostic — logs exactly where the Discord path dies
   // Connect to Discord FIRST so the bot comes ONLINE immediately. Registering
   // slash commands afterwards means a slow/hanging call or a bad DISCORD_GUILD_ID
   // can never block the login (which was leaving the bot offline).
