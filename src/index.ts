@@ -1,8 +1,21 @@
+import dns from 'node:dns';
 import { createServer } from 'node:http';
 import {
   Client, GatewayIntentBits, Partials, Events, MessageFlags,
   type Interaction, type Message,
 } from 'discord.js';
+
+// Force IPv4-first DNS resolution BEFORE any network stack initializes. On some
+// container hosts (Render), IPv6 egress to Discord silently black-holes: the REST
+// call inside client.login() — and the gateway WebSocket — connect to an AAAA
+// address whose packets vanish, so the connection HANGS with no error at all until
+// our watchdog force-restarts. That was the whole outage: dead-silent logs, "up but
+// never ready", every command "did not respond" — while the identical token + code
+// reach READY in ~2s locally over IPv4. Node defaults to 'verbatim' (often IPv6
+// first); pinning IPv4-first makes outbound resolve to A records so the connection
+// actually completes. Also settable without a deploy via NODE_OPTIONS=
+// --dns-result-order=ipv4first, but baking it in means it can never regress.
+dns.setDefaultResultOrder('ipv4first');
 import { CONFIG } from './config.js';
 import { db } from './db.js';
 import { ses } from './session.js';
@@ -304,7 +317,14 @@ async function main(): Promise<void> {
   // slash commands afterwards means a slow/hanging call or a bad DISCORD_GUILD_ID
   // can never block the login (which was leaving the bot offline).
   try {
-    await client.login(CONFIG.token);
+    // Hard timeout: client.login() resolves once the REST handshake succeeds and
+    // the shard is spawned — normally < 5s. If it instead HANGS (an IPv6 black-hole,
+    // a network stall), don't sit silent until the 10-min watchdog: fail fast so the
+    // host restarts and retries within seconds.
+    await Promise.race([
+      client.login(CONFIG.token),
+      new Promise((_res, rej) => setTimeout(() => rej(new Error('login() hung for 30s — no gateway handshake')), 30_000)),
+    ]);
   } catch (e) {
     console.error(
       '[discord] LOGIN FAILED — check that DISCORD_TOKEN is correct, and that Privileged ' +
