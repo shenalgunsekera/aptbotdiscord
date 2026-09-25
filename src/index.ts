@@ -299,62 +299,65 @@ function startCronDriver(): void {
   console.log('[cron-driver] driving', CONFIG.cronUrl, 'every 60s');
 }
 
-/** One-shot connectivity probe: proves WHERE the Render→Discord path dies — DNS,
- *  the REST handshake, or the gateway websocket. login() hanging tells us the REST
- *  call stalls, but not whether it's a hard network black-hole (abort/timeout) or a
- *  Cloudflare block (fast 403 + HTML). This logs the exact answer so we stop guessing. */
-async function probeDiscord(): Promise<void> {
-  const { promises: dnsp } = await import('node:dns');
-  for (const host of ['discord.com', 'gateway.discord.gg']) {
-    try {
-      const a = await dnsp.resolve4(host);
-      console.log(`[probe] DNS ${host} A → ${a.join(', ')}`);
-    } catch (e) { console.error(`[probe] DNS ${host} FAILED:`, (e as Error).message); }
-  }
-  // REST GET /gateway/bot with the token — the exact call login() makes first.
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Ask Discord's edge directly whether we're allowed to connect — a single GET
+ *  /gateway/bot, the exact call login() makes first. Returns the HTTP status and any
+ *  Retry-After. This is the gatekeeper: we ONLY hand control to discord.js's login()
+ *  when this returns 200, so discord.js is never given a 429 to retry-storm on. */
+async function edgeStatus(): Promise<{ status: number; retryAfterMs: number }> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 12_000);
   try {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 12_000);
-    const t0 = Date.now();
     const r = await fetch('https://discord.com/api/v10/gateway/bot', {
       headers: { Authorization: `Bot ${CONFIG.token}` }, signal: ac.signal,
     });
-    clearTimeout(timer);
-    const body = (await r.text()).slice(0, 160).replace(/\s+/g, ' ');
-    console.log(`[probe] REST /gateway/bot → HTTP ${r.status} in ${Date.now() - t0}ms — ${body}`);
+    void r.text().catch(() => {});   // drain the body so the socket frees
+    const ra = Number(r.headers.get('retry-after'));
+    return { status: r.status, retryAfterMs: Number.isFinite(ra) && ra > 0 ? ra * 1000 : 0 };
   } catch (e) {
-    console.error(`[probe] REST /gateway/bot FAILED/HUNG: ${(e as Error).name} — ${(e as Error).message}`);
-  }
+    console.error(`[discord] edge check errored: ${(e as Error).name} — ${(e as Error).message}`);
+    return { status: 0, retryAfterMs: 0 };
+  } finally { clearTimeout(timer); }
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-/** Log in to Discord, retrying IN-PROCESS with a long backoff — and NEVER exiting
- *  the process on a failed attempt. This is the fix for the Cloudflare 429 IP-ban
- *  that took the bot down: the old flow (login fails → process.exit → the host
- *  restarts → login fails → …) fired a request at Discord's edge every few seconds
- *  from this instance's IP, and that sustained hammering is what got the IP
- *  rate-limited (HTTP 429) in the first place — and kept it banned. Staying up and
- *  spacing attempts out (1m → 2m → 5m → 10m) lets the ban expire, then the next
- *  attempt connects and ClientReady fires. On a transient 429 discord.js also
- *  retries the login internally, so often the very first attempt just resolves late. */
+/** Connect to Discord — but GATE login() behind our own spaced edge check so we
+ *  never hammer the rate limiter. The bug that kept the bot down for hours: on a
+ *  429, discord.js's own login() keeps retrying the request INTERNALLY on a short
+ *  timer, silently, so even with the process no longer restart-looping we were still
+ *  tapping the limiter every few seconds — and it never cooled off. Here we instead
+ *  poll the edge OURSELVES at a wide interval (1m → 2m → 5m → 10m → 15m, or the
+ *  server's Retry-After, whichever is longer), and only call login() once the edge
+ *  says 200. Between checks we make ZERO requests to Discord, which is the only thing
+ *  that lets a rate-limit actually expire. client.destroy() after a stalled login
+ *  kills any lingering internal retry so it can't hammer in the gaps. */
 async function connectWithBackoff(): Promise<void> {
-  const backoff = [60_000, 120_000, 300_000, 600_000];
+  const backoff = [60_000, 120_000, 300_000, 600_000, 900_000];
   for (let attempt = 0; ; attempt++) {
-    try {
-      await client.login(CONFIG.token);
-      console.log('[discord] login() resolved — gateway handshaking, waiting for ready');
-      return;
-    } catch (e) {
-      const wait = backoff[Math.min(attempt, backoff.length - 1)]!;
-      console.error(
-        `[discord] login attempt ${attempt + 1} failed: ${(e as Error).message}. ` +
-        `Backing off ${wait / 1000}s before retrying — deliberately NOT restarting, because a ` +
-        `restart loop is what 429-bans this IP at Discord's edge. If it's a rate-limit, quiet ` +
-        `time is the only thing that clears it. (Token/intents are fine — verified.)`);
-      try { await client.destroy(); } catch { /* ignore — resetting for a clean retry */ }
-      await sleep(wait);
+    let wait = backoff[Math.min(attempt, backoff.length - 1)]!;
+    const { status, retryAfterMs } = await edgeStatus();
+    if (status === 200) {
+      console.log('[discord] edge is clear (HTTP 200) — logging in');
+      try {
+        await Promise.race([
+          client.login(CONFIG.token),
+          new Promise((_r, rej) => setTimeout(() => rej(new Error('login stalled 45s after a clean edge')), 45_000)),
+        ]);
+        console.log('[discord] login() resolved — gateway handshaking, waiting for ready');
+        return;
+      } catch (e) {
+        console.error(`[discord] login failed after a clean edge: ${(e as Error).message}. Retrying shortly.`);
+        try { await client.destroy(); } catch { /* ignore */ }
+        wait = 60_000;
+      }
+    } else {
+      wait = Math.max(wait, retryAfterMs);
+      console.warn(
+        `[discord] edge check ${attempt + 1}: HTTP ${status || 'unreachable'} — Discord is rate-limiting this IP. ` +
+        `NOT calling login() (that makes discord.js retry-storm and renews the ban). Going fully silent for ` +
+        `${Math.round(wait / 1000)}s${retryAfterMs ? ` (server Retry-After ${Math.round(retryAfterMs / 1000)}s)` : ''}, then re-checking.`);
     }
+    await sleep(wait);
   }
 }
 
@@ -362,8 +365,7 @@ async function main(): Promise<void> {
   startHealthServer();
   startSelfPing();
   startCronDriver();
-  await probeDiscord();          // diagnostic — logs exactly where the Discord path dies
-  await connectWithBackoff();    // in-process, self-healing — never restart-hammers Discord
+  await connectWithBackoff();    // edge-gated: never hands a 429 to discord.js, never hammers
   try {
     await registerCommands();
   } catch (e) {
