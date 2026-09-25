@@ -33,15 +33,21 @@ client.on(Events.ShardError, (e) => console.error('[discord shard error]', e));
 // self-heal. "did not respond" on every command = the process is up but the
 // gateway silently died and discord.js never reconnected — a zombie.
 let hasBeenReady = false;
+const BOOT = Date.now();
+const CONNECT_GRACE_MS = 90_000;   // allow this long to reach the gateway before we call it dead
 client.on(Events.ShardDisconnect, (ev, id) => console.error(`[gateway] shard ${id} disconnected (code ${ev.code})`));
 client.on(Events.ShardReconnecting, (id) => console.warn(`[gateway] shard ${id} reconnecting`));
 client.on(Events.ShardResume, (id) => console.log(`[gateway] shard ${id} resumed`));
-// Watchdog: if we were connected and the gateway has since dropped and NOT
-// recovered, exit so the host restarts us fresh (a clean reconnect). Never fires
-// during the initial connect — only after we've been ready at least once.
+// Watchdog: exit so the host restarts us fresh whenever the gateway is not ready
+// and either (a) it WAS ready and has since dropped, or (b) it has NEVER connected
+// within the grace window — a login that failed or a shard stuck Idle. Case (b) is
+// what left the bot "up but dead" (health 200, but every command → "did not
+// respond"): the old watchdog only handled (a). A fresh restart re-attempts the
+// gateway, which clears a transient connect rate-limit from rapid redeploys.
 setInterval(() => {
-  if (hasBeenReady && !client.isReady()) {
-    console.error('[watchdog] gateway down after being ready — exiting for a clean restart');
+  if (client.isReady()) return;
+  if (hasBeenReady || Date.now() - BOOT > CONNECT_GRACE_MS) {
+    console.error('[watchdog] gateway not ready — exiting for a clean restart');
     process.exit(1);
   }
 }, 30_000).unref();
@@ -220,16 +226,17 @@ async function replyError(i: Interaction): Promise<void> {
 function startHealthServer(): void {
   const port = Number(process.env.PORT ?? 8080);
   createServer((_req, res) => {
-    // ALWAYS 200 while the process is alive. It's tempting to return 503 until the
-    // gateway is ready, but that deadlocks Render's zero-downtime deploy: a bot
-    // token has ONE gateway session, so the NEW instance can't become ready while
-    // the OLD one still holds it — and Render won't kill the old one until the new
-    // reports healthy. Net result: deploys hang until Render's ~15-min timeout and
-    // fail. So report 200 (process up) and put the real gateway state in the body;
-    // a genuine zombie is handled by the watchdog, which exits and forces a restart.
+    // 200 during the initial connect GRACE window, then reflect real readiness.
+    // The grace is what unblocks Render's zero-downtime deploy: a bot token has ONE
+    // gateway session, so a brand-new instance is briefly not-ready while the old
+    // one still holds it — returning 503 there deadlocks the deploy (old won't die
+    // until new is healthy; new can't connect until old dies) and it times out.
+    // After the grace, a not-ready gateway is a real problem → 503 (and the
+    // watchdog restarts us). So: fast deploys AND a dead gateway can't hide.
     const ready = client.isReady();
+    const healthy = ready || Date.now() - BOOT < CONNECT_GRACE_MS;
     const body = JSON.stringify({ ready, wsStatus: client.ws.status, ping: client.ws.ping });
-    res.writeHead(200, { 'content-type': 'application/json' });
+    res.writeHead(healthy ? 200 : 503, { 'content-type': 'application/json' });
     res.end(body);
   }).listen(port, () => console.log(`[health] listening on ${port}`));
 }
@@ -294,10 +301,11 @@ async function main(): Promise<void> {
     await client.login(CONFIG.token);
   } catch (e) {
     console.error(
-      '[discord] LOGIN FAILED — the bot will be OFFLINE. Check that DISCORD_TOKEN is correct, ' +
-      'and that Privileged Gateway Intents (especially MESSAGE CONTENT) are turned ON in the ' +
-      'Discord Developer Portal → your app → Bot:', e);
-    return;
+      '[discord] LOGIN FAILED — check that DISCORD_TOKEN is correct, and that Privileged ' +
+      'Gateway Intents (especially MESSAGE CONTENT) are ON in the Discord Developer Portal ' +
+      '→ your app → Bot. Exiting so the host restarts and retries (often a transient gateway ' +
+      'rate-limit after rapid redeploys):', e);
+    process.exit(1);   // don't sit up with no gateway — restart and retry the login
   }
   try {
     await registerCommands();
