@@ -220,12 +220,16 @@ async function replyError(i: Interaction): Promise<void> {
 function startHealthServer(): void {
   const port = Number(process.env.PORT ?? 8080);
   createServer((_req, res) => {
-    // Report the REAL bot health, not just "the HTTP server is up". A ready
-    // gateway → 200; a zombie (process alive, gateway dead) → 503, so an uptime
-    // pinger / Render health check can see it and restart us.
+    // ALWAYS 200 while the process is alive. It's tempting to return 503 until the
+    // gateway is ready, but that deadlocks Render's zero-downtime deploy: a bot
+    // token has ONE gateway session, so the NEW instance can't become ready while
+    // the OLD one still holds it — and Render won't kill the old one until the new
+    // reports healthy. Net result: deploys hang until Render's ~15-min timeout and
+    // fail. So report 200 (process up) and put the real gateway state in the body;
+    // a genuine zombie is handled by the watchdog, which exits and forces a restart.
     const ready = client.isReady();
     const body = JSON.stringify({ ready, wsStatus: client.ws.status, ping: client.ws.ping });
-    res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
+    res.writeHead(200, { 'content-type': 'application/json' });
     res.end(body);
   }).listen(port, () => console.log(`[health] listening on ${port}`));
 }
