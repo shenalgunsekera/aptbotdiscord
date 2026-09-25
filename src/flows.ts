@@ -5,17 +5,21 @@ import {
 import { db } from './db.js';
 import type { PaymentMethod, Platform } from './core/index.js';
 
-/** Reply or follow-up depending on whether the interaction was already answered. */
+/** Reply, fill a deferred ack, or follow up — whichever fits the interaction's
+ *  current state. A handler that called deferReply() first (to ack within Discord's
+ *  3s window before slow DB work) lands in the editReply branch for its FIRST
+ *  response; anything after that follows up. */
 export async function say(i: RepliableInteraction, content: string, components: any[] = []): Promise<void> {
-  const body = { content, components, ephemeral: true } as const;
-  if (i.replied || i.deferred) await i.followUp(body);
-  else await i.reply(body);
+  if (i.deferred && !i.replied) { await i.editReply({ content, components }); return; }
+  if (i.replied || i.deferred) { await i.followUp({ content, components, ephemeral: true }); return; }
+  await i.reply({ content, components, ephemeral: true });
 }
 
 /** Post a visible (non-ephemeral) prompt so the player can answer by typing in chat. */
 export async function sayChat(i: RepliableInteraction, content: string): Promise<void> {
-  if (i.replied || i.deferred) await i.followUp({ content, ephemeral: false });
-  else await i.reply({ content, ephemeral: false });
+  if (i.deferred && !i.replied) { await i.editReply({ content }); return; }
+  if (i.replied || i.deferred) { await i.followUp({ content, ephemeral: false }); return; }
+  await i.reply({ content, ephemeral: false });
 }
 
 /** Send a message into the channel a player's message came from (their ticket). */

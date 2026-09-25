@@ -5,7 +5,7 @@
   "description": "Discord front-end for the ClubGG poker union settlement system — shares the same Neon database as the Telegram bot.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
