@@ -34,7 +34,13 @@ client.on(Events.ShardError, (e) => console.error('[discord shard error]', e));
 // gateway silently died and discord.js never reconnected — a zombie.
 let hasBeenReady = false;
 const BOOT = Date.now();
-const CONNECT_GRACE_MS = 90_000;   // allow this long to reach the gateway before we call it dead
+// Allow a GENEROUS window to reach the gateway before force-restarting. A short
+// window is actively harmful: a full process restart resets discord.js's own
+// reconnect backoff, so restarting every ~90s during a gateway connect rate-limit
+// (which rapid redeploys trigger) just hammers it and keeps it from ever
+// connecting. 10 min lets discord.js back off and reconnect on its own; we only
+// force a restart if it's still dead well past that.
+const CONNECT_GRACE_MS = 600_000;
 client.on(Events.ShardDisconnect, (ev, id) => console.error(`[gateway] shard ${id} disconnected (code ${ev.code})`));
 client.on(Events.ShardReconnecting, (id) => console.warn(`[gateway] shard ${id} reconnecting`));
 client.on(Events.ShardResume, (id) => console.log(`[gateway] shard ${id} resumed`));
