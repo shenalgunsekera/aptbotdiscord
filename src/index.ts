@@ -46,27 +46,20 @@ client.on(Events.ShardError, (e) => console.error('[discord shard error]', e));
 // self-heal. "did not respond" on every command = the process is up but the
 // gateway silently died and discord.js never reconnected — a zombie.
 let hasBeenReady = false;
-const BOOT = Date.now();
-// Allow a GENEROUS window to reach the gateway before force-restarting. A short
-// window is actively harmful: a full process restart resets discord.js's own
-// reconnect backoff, so restarting every ~90s during a gateway connect rate-limit
-// (which rapid redeploys trigger) just hammers it and keeps it from ever
-// connecting. 10 min lets discord.js back off and reconnect on its own; we only
-// force a restart if it's still dead well past that.
-const CONNECT_GRACE_MS = 600_000;
 client.on(Events.ShardDisconnect, (ev, id) => console.error(`[gateway] shard ${id} disconnected (code ${ev.code})`));
 client.on(Events.ShardReconnecting, (id) => console.warn(`[gateway] shard ${id} reconnecting`));
 client.on(Events.ShardResume, (id) => console.log(`[gateway] shard ${id} resumed`));
-// Watchdog: exit so the host restarts us fresh whenever the gateway is not ready
-// and either (a) it WAS ready and has since dropped, or (b) it has NEVER connected
-// within the grace window — a login that failed or a shard stuck Idle. Case (b) is
-// what left the bot "up but dead" (health 200, but every command → "did not
-// respond"): the old watchdog only handled (a). A fresh restart re-attempts the
-// gateway, which clears a transient connect rate-limit from rapid redeploys.
+// Watchdog: restart ONLY if the gateway was ready and has since died (a true
+// zombie). It must NEVER force-restart during the INITIAL connect — that was the
+// whole disaster: every restart fires another login at Discord's edge from this
+// instance's IP, and enough of those in a row earn a Cloudflare 429 IP-ban (the
+// bot's actual outage). Initial connect is owned by connectWithBackoff(), which
+// stays in-process and spaces attempts out so the ban can expire instead of being
+// perpetually renewed.
 setInterval(() => {
   if (client.isReady()) return;
-  if (hasBeenReady || Date.now() - BOOT > CONNECT_GRACE_MS) {
-    console.error('[watchdog] gateway not ready — exiting for a clean restart');
+  if (hasBeenReady) {
+    console.error('[watchdog] gateway dropped after being ready — exiting for a clean restart');
     process.exit(1);
   }
 }, 30_000).unref();
@@ -245,17 +238,14 @@ async function replyError(i: Interaction): Promise<void> {
 function startHealthServer(): void {
   const port = Number(process.env.PORT ?? 8080);
   createServer((_req, res) => {
-    // 200 during the initial connect GRACE window, then reflect real readiness.
-    // The grace is what unblocks Render's zero-downtime deploy: a bot token has ONE
-    // gateway session, so a brand-new instance is briefly not-ready while the old
-    // one still holds it — returning 503 there deadlocks the deploy (old won't die
-    // until new is healthy; new can't connect until old dies) and it times out.
-    // After the grace, a not-ready gateway is a real problem → 503 (and the
-    // watchdog restarts us). So: fast deploys AND a dead gateway can't hide.
+    // ALWAYS 200 while the process is alive. connectWithBackoff() keeps retrying the
+    // Discord login in-process; a 503 here could make Render's health check restart
+    // us mid-backoff — and a restart is exactly what re-hammers Discord's rate limiter
+    // and renews the 429 IP-ban. Real readiness lives in the JSON body, not the status
+    // code. (A gateway that dies AFTER being ready is handled by the watchdog exiting.)
     const ready = client.isReady();
-    const healthy = ready || Date.now() - BOOT < CONNECT_GRACE_MS;
     const body = JSON.stringify({ ready, wsStatus: client.ws.status, ping: client.ws.ping });
-    res.writeHead(healthy ? 200 : 503, { 'content-type': 'application/json' });
+    res.writeHead(200, { 'content-type': 'application/json' });
     res.end(body);
   }).listen(port, () => console.log(`[health] listening on ${port}`));
 }
@@ -337,31 +327,43 @@ async function probeDiscord(): Promise<void> {
   }
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Log in to Discord, retrying IN-PROCESS with a long backoff — and NEVER exiting
+ *  the process on a failed attempt. This is the fix for the Cloudflare 429 IP-ban
+ *  that took the bot down: the old flow (login fails → process.exit → the host
+ *  restarts → login fails → …) fired a request at Discord's edge every few seconds
+ *  from this instance's IP, and that sustained hammering is what got the IP
+ *  rate-limited (HTTP 429) in the first place — and kept it banned. Staying up and
+ *  spacing attempts out (1m → 2m → 5m → 10m) lets the ban expire, then the next
+ *  attempt connects and ClientReady fires. On a transient 429 discord.js also
+ *  retries the login internally, so often the very first attempt just resolves late. */
+async function connectWithBackoff(): Promise<void> {
+  const backoff = [60_000, 120_000, 300_000, 600_000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await client.login(CONFIG.token);
+      console.log('[discord] login() resolved — gateway handshaking, waiting for ready');
+      return;
+    } catch (e) {
+      const wait = backoff[Math.min(attempt, backoff.length - 1)]!;
+      console.error(
+        `[discord] login attempt ${attempt + 1} failed: ${(e as Error).message}. ` +
+        `Backing off ${wait / 1000}s before retrying — deliberately NOT restarting, because a ` +
+        `restart loop is what 429-bans this IP at Discord's edge. If it's a rate-limit, quiet ` +
+        `time is the only thing that clears it. (Token/intents are fine — verified.)`);
+      try { await client.destroy(); } catch { /* ignore — resetting for a clean retry */ }
+      await sleep(wait);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   startHealthServer();
   startSelfPing();
   startCronDriver();
-  await probeDiscord();   // diagnostic — logs exactly where the Discord path dies
-  // Connect to Discord FIRST so the bot comes ONLINE immediately. Registering
-  // slash commands afterwards means a slow/hanging call or a bad DISCORD_GUILD_ID
-  // can never block the login (which was leaving the bot offline).
-  try {
-    // Hard timeout: client.login() resolves once the REST handshake succeeds and
-    // the shard is spawned — normally < 5s. If it instead HANGS (an IPv6 black-hole,
-    // a network stall), don't sit silent until the 10-min watchdog: fail fast so the
-    // host restarts and retries within seconds.
-    await Promise.race([
-      client.login(CONFIG.token),
-      new Promise((_res, rej) => setTimeout(() => rej(new Error('login() hung for 30s — no gateway handshake')), 30_000)),
-    ]);
-  } catch (e) {
-    console.error(
-      '[discord] LOGIN FAILED — check that DISCORD_TOKEN is correct, and that Privileged ' +
-      'Gateway Intents (especially MESSAGE CONTENT) are ON in the Discord Developer Portal ' +
-      '→ your app → Bot. Exiting so the host restarts and retries (often a transient gateway ' +
-      'rate-limit after rapid redeploys):', e);
-    process.exit(1);   // don't sit up with no gateway — restart and retry the login
-  }
+  await probeDiscord();          // diagnostic — logs exactly where the Discord path dies
+  await connectWithBackoff();    // in-process, self-healing — never restart-hammers Discord
   try {
     await registerCommands();
   } catch (e) {
