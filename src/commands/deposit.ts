@@ -236,8 +236,8 @@ export async function onDepositSkip(i: ButtonInteraction, fillId: string): Promi
   }
   if (nf.payout_handle === 'STAFF') {
     ses(i.user.id).addFillId = undefined;   // a screenshot sent while waiting must not attach to this fill
-    try { await i.editReply({ components: [] }); } catch { /* strip the now-stale skip button */ }
-    await sendStaffProvideInstruction((c) => i.followUp({ content: c }).then(() => {}), i.channelId!, i.client, nf, m!.name);
+    // Replace the old tag card IN PLACE with the staff hand-off so no stale tag lingers.
+    await sendStaffProvideInstruction((c) => i.editReply({ content: c, components: [] }).then(() => {}), i.channelId!, i.client, nf, m!.name);
     return;
   }
 
