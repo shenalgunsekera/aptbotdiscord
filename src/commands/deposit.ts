@@ -219,6 +219,28 @@ export async function onDepositSkip(i: ButtonInteraction, fillId: string): Promi
   }
 
   const [m] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${nf.method_id}`;
+
+  // The next payee can be a club-BACKSTOP tier, not a plain tag. PeerPay and Staff
+  // are whole SYSTEMS (a minted checkout link / a human handing over a handle), not
+  // handles you send to — route them exactly like the initial deposit does, or the
+  // card would show the literal sentinel ("PEERPAY"/"STAFF") as an address (the bug).
+  if (nf.payout_handle === 'PEERPAY') {
+    ses(i.user.id).addFillId = nf.id;
+    const url = await peerpayCheckout({ amountCents: nf.amount, fillId: nf.id, rail: m!.code });
+    if (!url) {
+      return void (await i.editReply({ content: "We couldn't set up the payment link right now. Please /support and we'll sort it out — nothing was charged.", components: [] }));
+    }
+    const [pcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
+    const card = peerpayCard(nf, m!, url, pcfg?.match_timeout_seconds ?? 300);
+    return void (await i.editReply({ content: card.content, components: card.components }));
+  }
+  if (nf.payout_handle === 'STAFF') {
+    ses(i.user.id).addFillId = undefined;   // a screenshot sent while waiting must not attach to this fill
+    try { await i.editReply({ components: [] }); } catch { /* strip the now-stale skip button */ }
+    await sendStaffProvideInstruction((c) => i.followUp({ content: c }).then(() => {}), i.channelId!, i.client, nf, m!.name);
+    return;
+  }
+
   const [tcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
   const card = payInstructionCard([nf], m!, tcfg?.match_timeout_seconds ?? 300);
   ses(i.user.id).addFillId = nf.id;   // receipts attach to the new fill now
@@ -227,6 +249,22 @@ export async function onDepositSkip(i: ButtonInteraction, fillId: string): Promi
 
 /** PeerPay deposit: mint a checkout link + show Pay button and a "rail not
  *  available → backup tag" button. The screenshot flow is identical to normal. */
+/** The PeerPay "pay on the page" card — shared by the initial deposit and the
+ *  skip-to-next-tag re-render so PeerPay renders identically wherever it lands. */
+function peerpayCard(f: Fill, m: PaymentMethod, url: string, matchSecs: number): { content: string; components: any[] } {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(url),
+    new ButtonBuilder().setCustomId(`pp:backup:${f.id}`).setLabel(`⚠️ ${m.name} not available?`).setStyle(ButtonStyle.Secondary),
+  );
+  const content = `**💸 Pay ${money(f.amount, f.currency)} — you have ${windowLabel(matchSecs)}**\n\n` +
+    `1. Tap **Pay now**.\n` +
+    `2. Choose **${m.name}** on the page and send the payment.\n` +
+    `3. Come back and **upload a screenshot** of the confirmation here so we can add your money.\n\n` +
+    `_${m.name} not showing on the page? Tap the button below for another tag._\n` +
+    `_Changed your mind? \`/canceldeposit\` before you pay._`;
+  return { content, components: [row] };
+}
+
 async function sendPeerpayInstruction(msg: Message, f: Fill, m: PaymentMethod): Promise<void> {
   const url = await peerpayCheckout({ amountCents: f.amount, fillId: f.id, rail: m.code });
   ses(msg.author.id).addFillId = f.id;
@@ -236,18 +274,8 @@ async function sendPeerpayInstruction(msg: Message, f: Fill, m: PaymentMethod): 
     return void (await sendChannel(msg, "We couldn't set up the payment link right now. Please /support and we'll sort it out — nothing was charged."));
   }
   const [pcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
-  const rowc = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setLabel('💳 Pay now').setStyle(ButtonStyle.Link).setURL(url),
-    new ButtonBuilder().setCustomId(`pp:backup:${f.id}`).setLabel(`⚠️ ${m.name} not available?`).setStyle(ButtonStyle.Secondary),
-  );
-  await sendChannel(msg,
-    `**💸 Pay ${money(f.amount, f.currency)} — you have ${windowLabel(pcfg?.match_timeout_seconds ?? 300)}**\n\n` +
-      `1. Tap **Pay now**.\n` +
-      `2. Choose **${m.name}** on the page and send the payment.\n` +
-      `3. Come back and **upload a screenshot** of the confirmation here so we can add your money.\n\n` +
-      `_${m.name} not showing on the page? Tap the button below for another tag._\n` +
-      `_Changed your mind? \`/canceldeposit\` before you pay._`,
-    [rowc]);
+  const card = peerpayCard(f, m, url, pcfg?.match_timeout_seconds ?? 300);
+  await sendChannel(msg, card.content, card.components);
 }
 
 /** Look up a PeerPay fill's backup: a direct tag/link, or the sentinel 'STAFF'. */
