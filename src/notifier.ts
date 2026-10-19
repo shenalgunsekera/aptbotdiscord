@@ -36,7 +36,8 @@ export class Notifier {
       with c as (
         select id from notifications
          where platform = 'discord' and status = 'pending' and send_after <= now()
-         order by id limit 15 for update skip locked
+         -- Announcements queue BEHIND real messages, so a blast never delays a payment.
+         order by (kind = 'announcement'), id limit 15 for update skip locked
       )
       update notifications n set send_after = now() + interval '90 seconds'
         from c where n.id = c.id
@@ -78,7 +79,56 @@ export class Notifier {
   }
 }
 
-interface Rendered { content?: string; embeds?: EmbedBuilder[]; components?: ActionRowBuilder<ButtonBuilder>[] }
+interface Rendered {
+  content?: string; embeds?: EmbedBuilder[]; components?: ActionRowBuilder<ButtonBuilder>[];
+  allowedMentions?: { parse: [] };
+}
+
+/** Announcement (0123) → Discord message. The panel's markup (**bold**, _italic_,
+ *  __underline__, ~~strike~~, ||spoiler||, [text](url)) is native Discord markdown,
+ *  so it passes through. Images become embeds (≤4 share a URL so Discord shows them
+ *  as one gallery); buttons are link buttons; a reel link is left bare so Discord
+ *  previews it. Mentions are disabled — an announcement can never @everyone. */
+function renderAnnouncement(p: Record<string, any>): Rendered {
+  const isUrl = (u: unknown): u is string => typeof u === 'string' && /^https?:\/\/\S+/.test(u);
+  const preview = p.preview !== false;
+  const reel = isUrl(p.reel) ? p.reel : null;
+  let body = String(p.body ?? '');
+  // Previews off: wrap bare links in <…> so Discord doesn't unfurl them.
+  if (!preview) body = body.replace(/(^|[^(<])(https?:\/\/[^\s)>]+)/g, '$1<$2>');
+  const parts = [
+    p.test ? '🧪 _Test preview — only the admin channel sees this._' : '',
+    p.title ? `## ${String(p.title).trim()}` : '',
+    body.trim(),
+    reel && preview ? reel : '',
+  ].filter(Boolean);
+  const content = parts.join('\n').slice(0, 2000);
+
+  const images = (Array.isArray(p.images) ? p.images : []).filter(isUrl).slice(0, 10);
+  const shared = images.length > 1 && images.length <= 4 ? images[0] : null;   // gallery grouping
+  const embeds = images.map((u: string) => {
+    const e = new EmbedBuilder().setImage(u).setColor(0xe1306c);
+    return shared ? e.setURL(shared) : e;
+  });
+
+  const links: { label: string; url: string }[] = [
+    ...(reel ? [{ label: '▶️ Watch the reel', url: reel }] : []),
+    ...(Array.isArray(p.buttons) ? p.buttons : [])
+      .filter((b: any) => b && String(b.label ?? '').trim() && isUrl(b.url))
+      .map((b: any) => ({ label: String(b.label).trim().slice(0, 80), url: String(b.url) })),
+  ].slice(0, 25);
+  const components: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < links.length; i += 5) {
+    components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...links.slice(i, i + 5).map((l) => new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(l.label).setURL(l.url))));
+  }
+  return {
+    ...(content ? { content } : {}),
+    ...(embeds.length ? { embeds } : {}),
+    ...(components.length ? { components } : {}),
+    allowedMentions: { parse: [] },
+  };
+}
 const btn = (label: string, id: string, style = ButtonStyle.Success) =>
   new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
 const row = (...b: ButtonBuilder[]) => [new ActionRowBuilder<ButtonBuilder>().addComponents(...b)];
@@ -118,6 +168,10 @@ export function render(n: Notification): Rendered | null {
     // it. Convert Telegram *bold* to Discord **bold** (the text is shared). No buttons.
     case 'escalation.item':
       return { content: String(p.text ?? '').replace(/\*(.+?)\*/g, '**$1**') };
+
+    // ── Announcement to every player (and the admin channel for a test) ──
+    case 'announcement':
+      return renderAnnouncement(p);
 
     // ── Player-facing ──
     case 'fill.receipt_payee':
